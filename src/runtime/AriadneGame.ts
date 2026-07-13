@@ -326,9 +326,13 @@ export class AriadneGame {
         .roundRect(clientStation.x - 7, clientStation.y - 7, clientStation.width + 14, clientStation.height + 14, 19)
         .stroke({ color: client ? 0x9edcff : 0xff9caa, alpha: pulse, width: client ? 3 : 4 });
       if (!client) {
-        this.attentionLayer.arc(clientStation.x + 142, clientStation.y + 44, 18, -0.8, 0.8)
+        const signalX = clientStation.x + 142;
+        const signalY = clientStation.y + 44;
+        this.attentionLayer.moveTo(signalX + Math.cos(-0.8) * 18, signalY + Math.sin(-0.8) * 18)
+          .arc(signalX, signalY, 18, -0.8, 0.8)
           .stroke({ color: 0xffc0c8, alpha: pulse, width: 2 });
-        this.attentionLayer.arc(clientStation.x + 142, clientStation.y + 44, 27, -0.8, 0.8)
+        this.attentionLayer.moveTo(signalX + Math.cos(-0.8) * 27, signalY + Math.sin(-0.8) * 27)
+          .arc(signalX, signalY, 27, -0.8, 0.8)
           .stroke({ color: 0xffc0c8, alpha: pulse * 0.7, width: 2 });
       }
     }
