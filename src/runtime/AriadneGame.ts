@@ -1,7 +1,7 @@
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
 
 type StationId = 'capture' | 'edit' | 'delivery' | 'client';
-
+type ProductionStationId = Exclude<StationId, 'client'>;
 type RiskState = 'calm' | 'busy' | 'danger';
 
 interface Station {
@@ -31,6 +31,13 @@ const STATIONS: readonly Station[] = [
   { id: 'client', label: '客戶', x: 184, y: 153, width: 140, height: 88, color: 0xa95563 },
 ];
 
+const STAGE_ORDER: readonly ProductionStationId[] = ['capture', 'edit', 'delivery'];
+const WORK_DURATION: Record<ProductionStationId, number> = {
+  capture: 5.2,
+  edit: 6.4,
+  delivery: 4.8,
+};
+
 export class AriadneGame {
   private readonly app = new Application();
   private readonly world = new Container();
@@ -42,13 +49,17 @@ export class AriadneGame {
   private readonly photographerHead = new Graphics();
   private readonly photographerCamera = new Graphics();
   private readonly assistant = new Container();
-  private pressures: Record<StationId, number> = { capture: 18, edit: 8, delivery: 0, client: 4 };
-  private deadline = 90;
-  private combo = 0;
-  private comboGrace = 0;
-  private active: StationId = 'capture';
-  private elapsed = 0;
+  private readonly actionRing = new Graphics();
+  private pressures: Record<StationId, number> = { capture: 18, edit: 8, delivery: 0, client: 7 };
+  private deadline = 105;
+  private active: ProductionStationId = 'capture';
+  private assigned: ProductionStationId | null = null;
+  private workRemaining = 0;
+  private workTotal = 0;
   private stageProgress = 0;
+  private clientCooldown = 0;
+  private elapsed = 0;
+  private calmPause = 0;
 
   public constructor(private readonly host: HTMLDivElement) {}
 
@@ -68,8 +79,9 @@ export class AriadneGame {
     this.buildRoom();
     this.buildStations();
     this.buildPeople();
-    this.world.addChild(this.chaosVeil);
-    this.app.ticker.add((ticker) => this.update(ticker.deltaMS / 1000));
+    this.world.addChild(this.actionRing, this.chaosVeil);
+    this.setMessage('點一次派人工作。先觀察，再決定下一步。');
+    this.app.ticker.add((ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05)));
   }
 
   private buildRoom(): void {
@@ -89,7 +101,6 @@ export class AriadneGame {
     room.rect(387, 66, 82, 8).fill({ color: 0xeee5c6, alpha: 0.8 });
     room.rect(387, 84, 64, 8).fill({ color: 0xeee5c6, alpha: 0.6 });
     room.rect(387, 102, 74, 8).fill({ color: 0xeee5c6, alpha: 0.6 });
-
     this.world.addChild(room);
 
     const title = new Text({
@@ -133,12 +144,8 @@ export class AriadneGame {
       label.position.set(station.x + 10, station.y + 10);
       pressureLabel.anchor.set(1, 0);
       pressureLabel.position.set(station.x + station.width - 10, station.y + 10);
-
       root.addChild(body, detail, pressureBar, label, pressureLabel, ...queueDots);
-      root.on('pointerdown', (event) => {
-        const point = event.getLocalPosition(this.world);
-        this.onStationClick(station.id, point.x, point.y);
-      });
+      root.on('pointerdown', () => this.onStationClick(station.id));
 
       this.stationViews.set(station.id, { root, body, detail, pressureBar, label, pressureLabel, queueDots });
       this.world.addChild(root);
@@ -153,34 +160,48 @@ export class AriadneGame {
     this.photographerCamera.roundRect(8, -23, 17, 12, 3).fill({ color: 0x252a31 });
     this.photographerCamera.circle(20, -17, 4).fill({ color: 0x7ab6e8 });
     this.photographer.addChild(this.photographerBody, this.photographerHead, this.photographerCamera);
-    this.photographer.position.set(95, 490);
+    this.photographer.position.set(260, 520);
 
     const assistantBody = new Graphics();
     assistantBody.roundRect(-13, -24, 26, 34, 8).fill({ color: 0x5a477e });
     const assistantHead = new Graphics();
     assistantHead.circle(0, -36, 10).fill({ color: 0xe8ba9d });
     this.assistant.addChild(assistantBody, assistantHead);
-    this.assistant.position.set(260, 485);
-
+    this.assistant.position.set(420, 500);
     this.world.addChild(this.photographer, this.assistant);
   }
 
   private update(dt: number): void {
     this.elapsed += dt;
-    this.stageProgress += dt * (2.4 + this.combo * 0.015);
+    this.clientCooldown = Math.max(0, this.clientCooldown - dt);
+
+    if (this.calmPause > 0) {
+      this.calmPause -= dt;
+      this.animateRoom(0);
+      this.renderStations();
+      this.renderHud(0);
+      if (this.calmPause <= 0) this.startNextJob();
+      return;
+    }
 
     for (const station of STATIONS) {
-      const multiplier = station.id === this.active ? 1.35 : 1;
-      this.pressures[station.id] = Math.min(100, this.pressures[station.id] + dt * 1.4 * multiplier);
+      const stageMultiplier = station.id === this.active ? 1.24 : 1;
+      const clientMultiplier = station.id === 'client' ? 1.36 : 1;
+      const workingRelief = this.assigned === station.id ? -2.8 : 0;
+      const nextPressure = this.pressures[station.id] + dt * (1.05 * stageMultiplier * clientMultiplier + workingRelief);
+      this.pressures[station.id] = Math.max(0, Math.min(100, nextPressure));
+    }
+
+    if (this.assigned) {
+      this.workRemaining = Math.max(0, this.workRemaining - dt);
+      const completedRatio = 1 - this.workRemaining / this.workTotal;
+      this.stageProgress = Math.max(this.stageProgress, completedRatio * 100);
+      if (this.workRemaining <= 0) this.finishAssignment();
     }
 
     const stress = this.averagePressure();
-    this.deadline -= dt * (stress >= 70 ? 1.35 : 1);
+    this.deadline -= dt * (stress >= 70 ? 1.3 : 1);
 
-    if (this.comboGrace > 0) this.comboGrace -= dt;
-    else this.combo = Math.max(0, this.combo - dt * 8);
-
-    if (this.stageProgress >= 100) this.advanceStage();
     if (this.pressures[this.active] >= 100 || this.deadline <= 0) this.failStage();
 
     this.animateRoom(stress);
@@ -188,48 +209,92 @@ export class AriadneGame {
     this.renderHud(stress);
   }
 
-  private onStationClick(id: StationId, x: number, y: number): void {
-    const critical = Math.random() < 0.12;
-    const multiplier = 1 + Math.min(this.combo / 55, 1.8);
-    const relief = 8 * multiplier * (critical ? 2.8 : 1);
-    this.pressures[id] = Math.max(0, this.pressures[id] - relief);
+  private onStationClick(id: StationId): void {
+    if (this.calmPause > 0) return;
 
-    if (id === this.active) {
-      this.stageProgress = Math.min(100, this.stageProgress + 5.5 * multiplier * (critical ? 2.5 : 1));
+    if (id === 'client') {
+      if (this.clientCooldown > 0) {
+        this.setMessage('剛回覆過客戶。現在先把手上的事完成。');
+        return;
+      }
+      this.pressures.client = Math.max(0, this.pressures.client - 36);
+      this.clientCooldown = 12;
+      this.setMessage('已主動更新進度，客戶暫時安心。');
+      this.spawnFeedback(254, 185, '已回覆');
+      this.pulseStation('client');
+      return;
     }
 
-    this.combo += 1;
-    this.comboGrace = 2.2;
-    this.spawnFeedback(x, y, critical ? 'Moment' : `-${relief.toFixed(1)}`, critical);
+    if (id !== this.active) {
+      this.setMessage(`現在要先完成${this.stationLabel(this.active)}。`);
+      this.pulseStation(this.active);
+      return;
+    }
+
+    if (this.assigned) {
+      this.setMessage(`${this.stationLabel(this.assigned)}正在進行，不用連點。`);
+      return;
+    }
+
+    this.assigned = id;
+    this.workTotal = WORK_DURATION[id];
+    this.workRemaining = this.workTotal;
+    this.stageProgress = 0;
+    this.setMessage(`已派攝影師處理${this.stationLabel(id)}。觀察其他壓力。`);
+    this.spawnFeedback(this.stationCenter(id).x, this.stationCenter(id).y, '開始');
     this.pulseStation(id);
   }
 
+  private finishAssignment(): void {
+    const completed = this.assigned;
+    if (!completed) return;
+
+    this.pressures[completed] = Math.max(0, this.pressures[completed] - 46);
+    this.assigned = null;
+    this.stageProgress = 100;
+    this.advanceStage();
+  }
+
   private advanceStage(): void {
-    const order: StationId[] = ['capture', 'edit', 'delivery'];
-    const index = order.indexOf(this.active);
-    const next = order[index + 1];
+    const index = STAGE_ORDER.indexOf(this.active);
+    const next = STAGE_ORDER[index + 1];
 
     if (!next) {
-      this.active = 'capture';
-      this.deadline = 90;
-      this.stageProgress = 0;
-      this.pressures = { capture: 16, edit: 7, delivery: 0, client: 3 };
-      this.setMessage('準時交件。工作室安靜了下來。');
+      this.completeJob();
       return;
     }
 
     this.active = next;
     this.stageProgress = 0;
-    this.deadline += 12;
-    this.setMessage(`進入${this.stationLabel(next)}階段。`);
+    this.deadline += 14;
+    this.setMessage(`${this.stationLabel(STAGE_ORDER[index])}完成。下一步：${this.stationLabel(next)}。`);
+  }
+
+  private completeJob(): void {
+    this.assigned = null;
+    this.stageProgress = 100;
+    this.pressures = { capture: 0, edit: 0, delivery: 0, client: 0 };
+    this.calmPause = 4.5;
+    this.setMessage('交件完成。電話停了，工作室終於安靜。');
+    this.spawnFeedback(260, 270, '完成交件');
+  }
+
+  private startNextJob(): void {
+    this.active = 'capture';
+    this.deadline = 105;
+    this.stageProgress = 0;
+    this.pressures = { capture: 15, edit: 6, delivery: 0, client: 8 };
+    this.setMessage('下一個案件到了。點一次派人工作，不必狂按。');
   }
 
   private failStage(): void {
-    this.pressures[this.active] = Math.max(30, this.pressures[this.active] - 38);
-    this.stageProgress = Math.max(0, this.stageProgress - 30);
-    this.deadline += 16;
-    this.combo = 0;
-    this.setMessage(`${this.stationLabel(this.active)}失誤：進度退後，但仍然救得回來。`);
+    this.assigned = null;
+    this.workRemaining = 0;
+    this.pressures[this.active] = 42;
+    this.stageProgress = 0;
+    this.deadline += 22;
+    this.pressures.client = Math.min(100, this.pressures.client + 18);
+    this.setMessage(`${this.stationLabel(this.active)}出了差錯。進度退回，但案件仍救得回來。`);
   }
 
   private averagePressure(): number {
@@ -244,21 +309,27 @@ export class AriadneGame {
   }
 
   private animateRoom(stress: number): void {
-    const activeStation = STATIONS.find((station) => station.id === this.active);
-    if (activeStation) {
-      const targetX = activeStation.x + activeStation.width * 0.5;
-      const targetY = activeStation.y + activeStation.height + 62;
-      this.photographer.x += (targetX - this.photographer.x) * 0.035;
-      this.photographer.y += (targetY - this.photographer.y) * 0.035;
-    }
-
-    const bob = Math.sin(this.elapsed * 4.2) * (stress > 70 ? 3 : 1.3);
-    this.photographer.y += bob * 0.03;
-    this.assistant.y = 485 + Math.sin(this.elapsed * 2.2) * 2;
+    const destination = this.assigned ? this.stationCenter(this.assigned) : { x: 260, y: 520 };
+    const targetY = this.assigned ? destination.y + 115 : destination.y;
+    this.photographer.x += (destination.x - this.photographer.x) * 0.085;
+    this.photographer.y += (targetY - this.photographer.y) * 0.085;
+    this.photographer.rotation = this.assigned ? Math.sin(this.elapsed * 12) * 0.015 : 0;
+    this.assistant.y = 500 + Math.sin(this.elapsed * 2.2) * 2;
 
     this.ambientLayer.clear();
-    const sunlight = 0.055 + Math.sin(this.elapsed * 0.35) * 0.012;
+    const sunlight = this.calmPause > 0 ? 0.14 : 0.055 + Math.sin(this.elapsed * 0.35) * 0.012;
     this.ambientLayer.circle(80, 82, 160).fill({ color: 0xbfe5ff, alpha: sunlight });
+
+    this.actionRing.clear();
+    if (this.assigned) {
+      const station = STATIONS.find((candidate) => candidate.id === this.assigned);
+      if (station) {
+        const ratio = this.workRemaining / this.workTotal;
+        this.actionRing
+          .circle(station.x + station.width / 2, station.y + station.height / 2, 34 + ratio * 8)
+          .stroke({ color: 0xf3cf6c, alpha: 0.3 + (1 - ratio) * 0.55, width: 3 });
+      }
+    }
 
     this.chaosVeil.clear();
     if (stress > 45) {
@@ -273,37 +344,35 @@ export class AriadneGame {
       if (!view) continue;
 
       const pressure = this.pressures[station.id];
-      const active = station.id === this.active;
+      const isNext = station.id === this.active;
+      const isWorking = station.id === this.assigned;
       const risk = this.riskState(pressure);
       const statusColor = risk === 'danger' ? 0xef6676 : risk === 'busy' ? 0xe4ac55 : 0x65dc9a;
       const pulse = risk === 'danger' ? 0.78 + Math.sin(this.elapsed * 9) * 0.22 : 1;
 
       view.body.clear();
       view.body.roundRect(station.x, station.y, station.width, station.height, 14)
-        .fill({ color: station.color, alpha: active ? 1 : 0.78 })
+        .fill({ color: station.color, alpha: isNext || station.id === 'client' ? 1 : 0.64 })
         .stroke({
-          color: risk === 'danger' ? 0xef6676 : active ? 0xf3cf6c : 0xffffff,
-          alpha: risk === 'danger' || active ? pulse : 0.12,
-          width: risk === 'danger' || active ? 3 : 1,
+          color: isWorking ? 0xffffff : risk === 'danger' ? 0xef6676 : isNext ? 0xf3cf6c : 0xffffff,
+          alpha: isWorking || risk === 'danger' || isNext ? pulse : 0.12,
+          width: isWorking ? 4 : risk === 'danger' || isNext ? 3 : 1,
         });
 
       this.drawStationDetail(station, view.detail, pressure);
-
       view.pressureBar.clear();
       view.pressureBar.roundRect(station.x, station.y + station.height + 7, station.width, 9, 5).fill({ color: 0x10141e });
       view.pressureBar.roundRect(station.x, station.y + station.height + 7, station.width * (pressure / 100), 9, 5).fill({ color: statusColor });
-
-      view.label.alpha = active ? 1 : 0.82;
-      view.pressureLabel.text = `${Math.floor(pressure)}%`;
+      view.label.alpha = isNext || station.id === 'client' ? 1 : 0.58;
+      view.pressureLabel.text = isWorking ? '執行中' : `${Math.floor(pressure)}%`;
       view.pressureLabel.style.fill = risk === 'danger' ? 0xffc0c8 : risk === 'busy' ? 0xffd99a : 0xe6ebf3;
 
       const visibleDots = Math.ceil(pressure / 17);
       view.queueDots.forEach((dot, index) => {
         dot.clear();
         if (index >= visibleDots) return;
-        const dotX = station.x + 12 + index * 14;
-        const dotY = station.y + station.height - 17;
-        dot.circle(dotX, dotY, 4).fill({ color: statusColor, alpha: 0.55 + index * 0.06 });
+        dot.circle(station.x + 12 + index * 14, station.y + station.height - 17, 4)
+          .fill({ color: statusColor, alpha: 0.55 + index * 0.06 });
       });
     }
   }
@@ -331,9 +400,9 @@ export class AriadneGame {
     } else {
       detail.roundRect(station.x + 48 + shake, station.y + 31, 44, 35, 9).fill({ color: 0xe9edf4 });
       detail.circle(station.x + 70 + shake, station.y + 48, 4).fill({ color: pressure >= 75 ? 0xef6676 : 0x557dbd });
-      if (pressure >= 45) {
+      if (pressure >= 35) {
         detail.circle(station.x + 104, station.y + 24, 3).fill({ color: 0xffffff, alpha: 0.75 });
-        if (pressure >= 60) detail.circle(station.x + 116, station.y + 24, 3).fill({ color: 0xffffff, alpha: 0.75 });
+        if (pressure >= 55) detail.circle(station.x + 116, station.y + 24, 3).fill({ color: 0xffffff, alpha: 0.75 });
         if (pressure >= 75) detail.circle(station.x + 128, station.y + 24, 3).fill({ color: 0xffffff, alpha: 0.75 });
       }
     }
@@ -349,15 +418,15 @@ export class AriadneGame {
   private renderHud(stress: number): void {
     this.setText('deadline', `${Math.max(0, Math.ceil(this.deadline))}s`);
     this.setText('stress', `${Math.floor(stress)}%`);
-    this.setText('combo', `${Math.floor(this.combo)}`);
+    this.setText('combo', this.assigned ? '執行中' : '待命');
   }
 
-  private spawnFeedback(x: number, y: number, text: string, critical: boolean): void {
+  private spawnFeedback(x: number, y: number, text: string): void {
     const label = new Text({
       text,
       style: new TextStyle({
-        fill: critical ? 0xffef9f : 0xe9edf5,
-        fontSize: critical ? 22 : 14,
+        fill: 0xffef9f,
+        fontSize: 18,
         fontWeight: '700',
         stroke: { color: 0x141821, width: 4 },
       }),
@@ -366,17 +435,24 @@ export class AriadneGame {
     label.position.set(x, y);
     this.world.addChild(label);
 
-    let elapsed = 0;
+    let lifetime = 0;
     const animate = () => {
-      elapsed += this.app.ticker.deltaMS / 1000;
-      label.y -= this.app.ticker.deltaMS * 0.035;
-      label.alpha = Math.max(0, 1 - elapsed / 0.85);
-      if (elapsed >= 0.85) {
+      lifetime += this.app.ticker.deltaMS / 1000;
+      label.y -= this.app.ticker.deltaMS * 0.025;
+      label.alpha = Math.max(0, 1 - lifetime / 1.1);
+      if (lifetime >= 1.1) {
         this.app.ticker.remove(animate);
         label.destroy();
       }
     };
     this.app.ticker.add(animate);
+  }
+
+  private stationCenter(id: StationId): { x: number; y: number } {
+    const station = STATIONS.find((candidate) => candidate.id === id);
+    return station
+      ? { x: station.x + station.width / 2, y: station.y + station.height / 2 }
+      : { x: 260, y: 520 };
   }
 
   private stationLabel(id: StationId): string {
