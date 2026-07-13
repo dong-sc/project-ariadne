@@ -52,9 +52,20 @@ After the first two deliveries, the player turns one observation into a persiste
 
 The upgrade is framed as one less future coordination step, not a score multiplier. It persists for the remaining shift and appears directly on the upgraded station.
 
+## Workweek continuation
+
+Shift clear is now the end of a day, not the end of the game.
+
+- learned area SOPs persist into the next workday
+- equipment, specialist, incidents, and rumors are prepared again each day
+- the event lineup rotates across three distinct workdays
+- campaign day and SOP levels are saved in the browser
+- each new day begins from a calmer, more capable studio without removing uncertainty
+
 ## Current boundaries
 
 - one specialist joins each shift; a full multi-photographer roster is not implemented yet
 - support spaces react to rumors but do not yet host independent coverage assignments
-- upgrades reset between shifts; long-term studio memory is not implemented yet
+- event lineups cycle after the third workday; a larger authored event pool is not implemented yet
+- browser persistence stores the workday and SOPs, but not a partially completed case
 - there is no store, rarity, loot, equipment level, or blocking event dialog

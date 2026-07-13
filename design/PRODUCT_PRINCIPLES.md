@@ -15,6 +15,8 @@
 13. Information travels through people and places; an unchecked sentence can become operational reality.
 14. A workflow upgrade should remove a future coordination step, not merely raise a number.
 15. Specialists create different ways to read a scene, not a rarity ladder.
+16. Time-sensitive information earns its own visual space; urgency must never depend on reading tiny text.
+17. Progress preserves methods and SOPs, not an ever-growing pile of power.
 
 ## Ariadne Principle
 

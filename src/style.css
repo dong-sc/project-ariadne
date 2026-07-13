@@ -22,6 +22,10 @@ body { overflow: hidden; }
 .metric span { color: #aab3c4; font-size: 10px; }
 .metric-brief { flex: 1.2; border-color: rgba(244,210,118,.18); background: linear-gradient(145deg,rgba(42,40,31,.9),rgba(20,25,35,.82)); }
 .metric-brief span { color: #d5c795; }
+#deadline-card { transition: border-color .25s ease, background-color .25s ease, transform .25s ease; }
+#deadline-card.is-warning { border-color: rgba(228,172,85,.55); background: rgba(78,53,23,.9); }
+#deadline-card.is-danger { border-color: rgba(239,102,118,.72); background: rgba(82,27,36,.94); transform: translateY(-1px); }
+#deadline-card.is-danger b { color: #ffd8dd; }
 .loadout-strip { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: #95a0b2; font-size: 9px; }
 .loadout-strip span { color: #6f7a8c; font-weight: 800; letter-spacing: .08em; }
 .loadout-strip b { padding: 3px 7px; border: 1px solid rgba(158,220,255,.16); border-radius: 999px; color: #c7d5e6; background: rgba(13,18,27,.72); font-weight: 700; }
@@ -34,6 +38,15 @@ body { overflow: hidden; }
 .crew-strip i.is-resolved { color: #aaf0c5; }
 .game-canvas { position: absolute; inset: 0; }
 .game-canvas canvas { display: block; width: 100%; height: 100%; }
+.priority-alert { position: absolute; z-index: 16; top: calc(142px + env(safe-area-inset-top)); right: 14px; left: 14px; padding: 12px 14px; border: 1px solid rgba(239,102,118,.55); border-radius: 15px; color: #fff1f3; background: linear-gradient(145deg,rgba(83,27,37,.97),rgba(33,15,22,.97)); box-shadow: 0 16px 42px rgba(0,0,0,.38), 0 0 0 1px rgba(255,255,255,.04) inset; opacity: 0; pointer-events: none; transform: translateY(-8px) scale(.985); transition: opacity .24s ease, transform .28s ease; }
+.priority-alert.is-visible { opacity: 1; transform: translateY(0) scale(1); }
+.priority-alert-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.priority-alert-topline span { color: #ffacb7; font-size: 9px; font-weight: 900; letter-spacing: .13em; }
+.priority-alert-topline b { min-width: 42px; padding: 3px 8px; border-radius: 999px; color: #241116; background: #ffb8c1; font-size: 12px; text-align: center; }
+.priority-alert > strong { display: block; margin-top: 7px; font-size: 15px; line-height: 1.38; letter-spacing: -.01em; }
+.priority-alert > small { display: block; margin-top: 5px; color: #d6b9be; font-size: 10px; line-height: 1.4; }
+.priority-alert.has-checked-zone { border-color: rgba(215,168,230,.62); background: linear-gradient(145deg,rgba(65,35,75,.97),rgba(29,18,35,.97)); }
+.priority-alert.has-checked-zone .priority-alert-topline span { color: #e5b8ef; }
 .bottom-copy { position: absolute; z-index: 10; left: 14px; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); min-height: 42px; padding: 11px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 14px; color: #e0e5ee; background: rgba(8,11,16,.88); box-shadow: 0 10px 30px rgba(0,0,0,.24); backdrop-filter: blur(10px); pointer-events: none; font-size: 12px; line-height: 1.45; transition: opacity .35s ease, transform .35s ease; }
 
 .preflight { position: absolute; z-index: 30; top: calc(142px + env(safe-area-inset-top)); right: 14px; bottom: calc(70px + env(safe-area-inset-bottom)); left: 14px; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; padding: 18px; border: 1px solid rgba(158,220,255,.26); border-radius: 20px; background: linear-gradient(165deg,rgba(25,33,45,.97),rgba(10,14,21,.97)); box-shadow: 0 24px 80px rgba(0,0,0,.5); opacity: 0; pointer-events: none; transform: translateY(12px); transition: opacity .45s ease, transform .55s cubic-bezier(.2,.8,.2,1); }
@@ -62,6 +75,7 @@ body { overflow: hidden; }
 .preflight > button:disabled { color: #6d7783; background: #28303a; cursor: default; opacity: .72; }
 .game-shell.is-preflight .game-canvas { opacity: .48; filter: saturate(.7); }
 .game-shell.is-preflight .bottom-copy { opacity: .2; }
+.game-shell.is-preflight .priority-alert { display: none; }
 .game-shell.is-incident-contained .bottom-copy { border-color: rgba(101,220,154,.5); }
 .game-shell.is-incident-exposed .bottom-copy { border-color: rgba(239,102,118,.55); background: rgba(38,14,19,.9); }
 
@@ -109,6 +123,8 @@ body { overflow: hidden; }
   .metric { padding: 6px; }
   .metric b { font-size: 11px; }
   .bottom-copy { right: 10px; left: 10px; }
+  .priority-alert { top: calc(138px + env(safe-area-inset-top)); right: 10px; left: 10px; padding: 11px 12px; }
+  .priority-alert > strong { font-size: 14px; }
   .completion { right: 18px; left: 18px; }
   .preflight { right: 10px; left: 10px; padding: 14px; }
   .equipment-option { min-height: 62px; padding: 7px; }

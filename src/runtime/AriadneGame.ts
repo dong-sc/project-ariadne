@@ -5,6 +5,7 @@ import {
   JOB_BRIEFS,
   SPECIALISTS,
   STAGE_ORDER,
+  type CampaignProgress,
   type DispatchResult,
   type EquipmentId,
   type IncidentOutcome,
@@ -19,6 +20,8 @@ import {
   type UpgradeZoneId,
 } from './AriadneLoop';
 import { calculateWorldLayout } from './layout';
+
+const CAMPAIGN_STORAGE_KEY = 'project-ariadne:workweek';
 
 type RiskState = 'calm' | 'busy' | 'danger';
 
@@ -158,6 +161,8 @@ export class AriadneGame {
 
     document.querySelector<HTMLButtonElement>('#next-job')?.addEventListener('click', () => this.startNextJob());
     this.loop.prepareShift();
+    const savedCampaign = this.loadCampaign();
+    if (savedCampaign) this.loop.restoreCampaign(savedCampaign);
     this.setupPreflight();
     this.setupUpgrades();
     this.openPreflight();
@@ -389,7 +394,16 @@ export class AriadneGame {
     }
     document.querySelector('#preflight')?.classList.add('is-visible');
     document.querySelector('.game-shell')?.classList.add('is-preflight');
-    this.setMessage('出發前聽到四段風聲，其中一段今晚不會發生。你能帶兩樣，不能把未知全部消掉。');
+    const learnedSops = Object.values(this.loop.state.zoneUpgrades).filter((level) => level > 0).length;
+    this.setText(
+      'preflight-title',
+      this.loop.state.shiftNumber === 1 ? '今晚只帶兩樣' : `工作日 ${this.loop.state.shiftNumber}｜重新整備`,
+    );
+    this.setMessage(
+      this.loop.state.shiftNumber === 1
+        ? '出發前聽到四段風聲，其中一段今晚不會發生。你能帶兩樣，不能把未知全部消掉。'
+        : `工作室保留了 ${learnedSops} 處 SOP。今天換一組活動與風聲，但你不再從零開始。`,
+    );
     this.renderPreflightSelection();
     this.renderLoadout();
     this.renderCrewState();
@@ -463,6 +477,7 @@ export class AriadneGame {
 
   private chooseUpgrade(zone: UpgradeZoneId): void {
     if (!this.loop.applyZoneUpgrade(zone)) return;
+    this.saveCampaign();
     const copy = UPGRADE_COPY[zone];
     this.setText('upgrade-copy', `${copy.label}已留下。這不是分數，是下一案少做的一件事。`);
     this.renderUpgradeChoices();
@@ -490,16 +505,29 @@ export class AriadneGame {
     const rumorElement = document.querySelector<HTMLElement>('#field-rumor');
     const rumor = this.loop.state.currentRumor;
     const rumorDefinition = this.loop.currentRumorDefinition();
+    const priorityAlert = document.querySelector<HTMLElement>('#priority-alert');
     if (!rumorElement) return;
     rumorElement.classList.remove('is-active', 'is-resolved');
+    priorityAlert?.classList.remove('is-visible', 'has-checked-zone');
     if (!this.loop.state.shiftStarted) {
       rumorElement.textContent = '現場還沒有風聲';
     } else if (rumor?.phase === 'active' && rumorDefinition) {
       const checked = rumor.checkedZones.length > 0
         ? `已排除${rumor.checkedZones.map((zone) => this.supportZoneLabel(zone)).join('、')} · `
         : '';
-      rumorElement.textContent = `風聲 ${Math.ceil(rumor.remaining)}s｜${checked}${rumorDefinition.line}`;
+      rumorElement.textContent = `未確認風聲 · ${Math.ceil(rumor.remaining)}s${checked ? ` · ${checked.replace(' · ', '')}` : ''}`;
       rumorElement.classList.add('is-active');
+      priorityAlert?.classList.add('is-visible');
+      priorityAlert?.classList.toggle('has-checked-zone', rumor.checkedZones.length > 0);
+      this.setText('priority-alert-kind', rumor.checkedZones.length > 0 ? '現場風聲 · 已排除一處' : '現場風聲 · 未確認');
+      this.setText('priority-alert-time', `${Math.ceil(rumor.remaining)}s`);
+      this.setText('priority-alert-text', rumorDefinition.line);
+      this.setText(
+        'priority-alert-hint',
+        rumor.checkedZones.length > 0
+          ? `${rumor.checkedZones.map((zone) => this.supportZoneLabel(zone)).join('、')}已排除。改查另一處，仍來得及。`
+          : '判斷消息來源，派搭檔去側台或媒體席查證。',
+      );
     } else if (rumor?.phase === 'resolved') {
       rumorElement.textContent = '風聲已查清，沒有繼續擴散';
       rumorElement.classList.add('is-resolved');
@@ -1052,9 +1080,14 @@ export class AriadneGame {
 
     this.setText('next-action', nextAction);
     const brief = this.loop.currentBrief();
+    this.setText('shift-label', `WORKDAY ${this.loop.state.shiftNumber} · ONE DECISION`);
     this.setText('job-title', brief.title);
     this.setText('job-focus', `${this.loop.state.jobIndex + 1}/${JOB_BRIEFS.length} · ${brief.focus}`);
     this.setText('deadline', !this.loop.state.shiftStarted ? '—' : this.loop.state.completed ? '完成' : `${Math.max(0, Math.ceil(this.loop.state.deadline))}s`);
+    const deadlineCard = document.querySelector('#deadline-card');
+    const deadline = this.loop.state.deadline;
+    deadlineCard?.classList.toggle('is-warning', this.loop.state.shiftStarted && !this.loop.state.completed && deadline <= 24 && deadline > 12);
+    deadlineCard?.classList.toggle('is-danger', this.loop.state.shiftStarted && !this.loop.state.completed && deadline <= 12);
     this.setText('studio-state', !this.loop.state.shiftStarted
       ? '整備中'
       : this.loop.state.completed
@@ -1085,7 +1118,7 @@ export class AriadneGame {
     this.setText('completion-kicker', shiftComplete ? 'SHIFT CLEAR' : `DELIVERED · ${currentCase}/${JOB_BRIEFS.length}`);
     this.setText('completion-title', shiftComplete ? '今天可以收工了' : '本案已交件');
     this.setText('completion-copy', shiftComplete
-      ? '三種風險節奏都已處理完畢。好的流程不是更忙，而是讓忙亂有結束。'
+      ? `工作日 ${this.loop.state.shiftNumber} 結束。今天建立的 SOP 會留在工作室，明天不必從零開始。`
       : `壓力歸零。下一案「${nextBrief.title}」會帶來不同的觀察順序。`);
     const insight = this.outcomeCopy(outcome);
     this.setText('outcome-title', insight.title);
@@ -1104,7 +1137,10 @@ export class AriadneGame {
         : `沒人查證：${rumorOutcome.line}`
       : '這一案沒有留下可追的耳語');
     this.setText('rumor-detail', rumorOutcome?.detail ?? '不是每一句閒話都重要，但重要的那句需要有人去確認。');
-    this.setText('next-job', shiftComplete ? '重新開始一輪工作日' : `接下一案｜${nextBrief.title}`);
+    this.setText(
+      'next-job',
+      shiftComplete ? `進入工作日 ${this.loop.state.shiftNumber + 1}｜保留 SOP` : `接下一案｜${nextBrief.title}`,
+    );
 
     const upgradePanel = document.querySelector('#upgrade-panel');
     upgradePanel?.classList.toggle('is-hidden', shiftComplete);
@@ -1122,7 +1158,6 @@ export class AriadneGame {
 
   private startNextJob(): void {
     const shiftComplete = this.loop.isShiftComplete();
-    this.loop.startNextJob();
     document.querySelector('.game-shell')?.classList.remove('is-complete');
     document.querySelector('.game-shell')?.classList.remove('is-shift-complete');
     document.querySelector('#completion')?.classList.remove('is-visible');
@@ -1130,10 +1165,12 @@ export class AriadneGame {
     this.assistant.position.set(420, 520);
     this.specialist.position.set(260, 558);
     if (shiftComplete) {
-      this.loop.prepareShift();
+      this.loop.prepareNextShift();
+      this.saveCampaign();
       this.openPreflight();
       return;
     }
+    this.loop.startNextJob();
     const nextButton = document.querySelector<HTMLButtonElement>('#next-job');
     if (nextButton) nextButton.disabled = false;
     const brief = this.loop.currentBrief();
@@ -1241,5 +1278,22 @@ export class AriadneGame {
   private setText(id: string, value: string): void {
     const element = document.getElementById(id);
     if (element) element.textContent = value;
+  }
+
+  private loadCampaign(): CampaignProgress | null {
+    try {
+      const value = window.localStorage.getItem(CAMPAIGN_STORAGE_KEY);
+      return value ? JSON.parse(value) as CampaignProgress : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private saveCampaign(): void {
+    try {
+      window.localStorage.setItem(CAMPAIGN_STORAGE_KEY, JSON.stringify(this.loop.campaignProgress()));
+    } catch {
+      // The game remains playable when storage is unavailable.
+    }
   }
 }

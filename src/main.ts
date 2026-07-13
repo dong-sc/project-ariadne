@@ -10,12 +10,12 @@ async function bootstrap(): Promise<void> {
       <header class="game-hud">
         <div class="title-row">
           <h1>Project Ariadne</h1>
-          <span class="sprint-label">ONE CLICK · ONE DECISION</span>
+          <span class="sprint-label" id="shift-label">WORKDAY 1 · ONE DECISION</span>
         </div>
         <p id="next-action">下一步｜派工拍攝</p>
         <div class="metrics">
           <div class="metric metric-brief"><b id="job-title">活動快訊</b><span id="job-focus">1/3 · 三站平衡</span></div>
-          <div class="metric"><b id="deadline">78s</b><span>截止</span></div>
+          <div class="metric" id="deadline-card"><b id="deadline">78s</b><span>截止</span></div>
           <div class="metric"><b id="studio-state">穩定</b><span>工作室</span></div>
           <div class="metric"><b id="assistant-state">待命</b><span>流程助理</span></div>
         </div>
@@ -27,6 +27,14 @@ async function bootstrap(): Promise<void> {
         </div>
       </header>
       <div class="game-canvas" id="game-canvas"></div>
+      <section class="priority-alert" id="priority-alert" aria-live="assertive" aria-atomic="true">
+        <div class="priority-alert-topline">
+          <span id="priority-alert-kind">現場風聲</span>
+          <b id="priority-alert-time">13s</b>
+        </div>
+        <strong id="priority-alert-text">有一句未經確認的話正在擴散。</strong>
+        <small id="priority-alert-hint">判斷來源，派搭檔去側台或媒體席查證。</small>
+      </section>
       <section class="preflight" id="preflight" aria-labelledby="preflight-title">
         <span>PRE-FLIGHT · 情報不完整</span>
         <h2 id="preflight-title">今晚只帶兩樣</h2>

@@ -324,4 +324,38 @@ describe('AriadneLoop', () => {
     expect(loop.state.zoneUpgrades.edit).toBe(1);
     expect(loop.currentWorkDuration('edit')).toBeCloseTo(nextBrief.workDuration.edit - 1);
   });
+
+  it('carries learned SOPs into a new workday with a different event cycle', () => {
+    const loop = new AriadneLoop();
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    expect(loop.applyZoneUpgrade('client')).toBe(true);
+
+    loop.prepareNextShift();
+
+    expect(loop.state.shiftNumber).toBe(2);
+    expect(loop.state.zoneUpgrades.client).toBe(1);
+    expect(loop.currentBrief().title).toBe('全國技能競賽');
+    expect(loop.state.shiftStarted).toBe(false);
+    expect(loop.state.deliveredJobs).toBe(0);
+  });
+
+  it('restores the saved workweek without trusting invalid upgrade levels', () => {
+    const loop = new AriadneLoop();
+    loop.prepareShift();
+
+    expect(loop.restoreCampaign({
+      shiftNumber: 3,
+      zoneUpgrades: { capture: 8, edit: 1, delivery: -4, client: 2 },
+    })).toBe(true);
+
+    expect(loop.state.shiftNumber).toBe(3);
+    expect(loop.state.zoneUpgrades).toEqual({ capture: 2, edit: 1, delivery: 0, client: 2 });
+    expect(loop.currentBrief().title).toBe('國際論壇');
+    expect(loop.campaignProgress()).toEqual({
+      shiftNumber: 3,
+      zoneUpgrades: { capture: 2, edit: 1, delivery: 0, client: 2 },
+    });
+  });
 });

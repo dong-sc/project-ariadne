@@ -100,6 +100,11 @@ export interface JobOutcome {
   workflowBuffer: number;
 }
 
+export interface CampaignProgress {
+  shiftNumber: number;
+  zoneUpgrades: Record<UpgradeZoneId, number>;
+}
+
 export interface ProductionAssignment {
   station: ProductionStationId;
   phase: AssignmentPhase;
@@ -149,6 +154,7 @@ export interface LoopState {
   jobElapsed: number;
   zoneUpgrades: Record<UpgradeZoneId, number>;
   upgradeChosenForJob: boolean;
+  shiftNumber: number;
 }
 
 export type DispatchResult =
@@ -350,6 +356,24 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
   },
 ];
 
+const EVENT_VARIANTS: readonly (readonly Pick<JobBrief, 'title' | 'focus' | 'cue'>[])[] = [
+  [
+    { title: '品牌發表會', focus: '舞台＋媒體聯訪', cue: '舞台、媒體與公關各自拿著一份看起來都正確的流程' },
+    { title: '年度頒獎典禮', focus: '得獎人＋長官動線', cue: '名單一直在改，真正能決定拍攝順序的人還沒有出現' },
+    { title: '千人晚宴', focus: '晚間即時發稿', cue: '所有人都說來得及，舞台、合照與發稿條件卻沒有人一起實測' },
+  ],
+  [
+    { title: '全國技能競賽', focus: '雙館＋選手覆蓋', cue: '每一區都說拍完了，總表上卻還有人沒有任何紀錄' },
+    { title: '大型記者會', focus: '長官＋即時發稿', cue: '致詞順序臨時對調，媒體群組仍在轉傳上一版流程' },
+    { title: '企業家庭日', focus: '舞台＋全員合照', cue: '大家都說可以最後補拍，但接駁車會準時把人送走' },
+  ],
+  [
+    { title: '國際論壇', focus: '多語窗口＋分流', cue: '三個窗口都能回答問題，卻沒有一個人能確認最後交付規格' },
+    { title: '音樂節頒獎', focus: '舞台＋後台人物', cue: '表演、頒獎與採訪共用同一條狹窄動線' },
+    { title: '年度尾牙', focus: '抽獎＋即時社群', cue: '流程一直往前趕，重要人物卻只在座位上停留幾分鐘' },
+  ],
+];
+
 export const WORK_DURATION = JOB_BRIEFS[0]!.workDuration;
 
 export const CLIENT_WORK_DURATION = 2.8;
@@ -461,16 +485,24 @@ export class AriadneLoop {
     jobElapsed: 0,
     zoneUpgrades: { capture: 0, edit: 0, delivery: 0, client: 0 },
     upgradeChosenForJob: false,
+    shiftNumber: 1,
   };
 
   public constructor(private readonly rng: () => number = Math.random) {}
 
+  private briefFor(index: number, shiftNumber: number): JobBrief {
+    const base = jobBrief(index);
+    const cycle = EVENT_VARIANTS[(Math.max(1, shiftNumber) - 1) % EVENT_VARIANTS.length] ?? EVENT_VARIANTS[0]!;
+    const variant = cycle[index] ?? cycle[0]!;
+    return { ...base, ...variant };
+  }
+
   public currentBrief(): JobBrief {
-    return jobBrief(this.state.jobIndex);
+    return this.briefFor(this.state.jobIndex, this.state.shiftNumber);
   }
 
   public nextBrief(): JobBrief {
-    return jobBrief((this.state.jobIndex + 1) % JOB_BRIEFS.length);
+    return this.briefFor((this.state.jobIndex + 1) % JOB_BRIEFS.length, this.state.shiftNumber);
   }
 
   public currentWorkDuration(station: ProductionStationId): number {
@@ -485,6 +517,37 @@ export class AriadneLoop {
   }
 
   public prepareShift(): void {
+    this.state.shiftNumber = 1;
+    this.state.zoneUpgrades = { capture: 0, edit: 0, delivery: 0, client: 0 };
+    this.setupShift();
+  }
+
+  public prepareNextShift(): void {
+    this.state.shiftNumber += 1;
+    this.setupShift();
+  }
+
+  public restoreCampaign(progress: CampaignProgress): boolean {
+    if (!Number.isFinite(progress.shiftNumber) || progress.shiftNumber < 1) return false;
+    const zones = Object.keys(this.state.zoneUpgrades) as UpgradeZoneId[];
+    if (!zones.every((zone) => Number.isFinite(progress.zoneUpgrades?.[zone]))) return false;
+    this.state.shiftNumber = Math.max(1, Math.floor(progress.shiftNumber));
+    for (const zone of zones) {
+      this.state.zoneUpgrades[zone] = Math.max(0, Math.min(2, Math.floor(progress.zoneUpgrades[zone])));
+    }
+    this.state.pressures = initialPressures(this.state.jobIndex, this.state.workflowBuffer);
+    this.state.deadline = this.currentBrief().deadline;
+    return true;
+  }
+
+  public campaignProgress(): CampaignProgress {
+    return {
+      shiftNumber: this.state.shiftNumber,
+      zoneUpgrades: { ...this.state.zoneUpgrades },
+    };
+  }
+
+  private setupShift(): void {
     this.incidentPlan = createIncidentPlan(this.rng);
     this.signalOrder = createSignalOrder(this.rng);
     this.rumorPlan = createRumorPlan(this.rng);
@@ -501,8 +564,24 @@ export class AriadneLoop {
     this.state.lastRumorOutcome = null;
     this.state.rumorHistory = [];
     this.state.jobElapsed = 0;
-    this.state.zoneUpgrades = { capture: 0, edit: 0, delivery: 0, client: 0 };
     this.state.upgradeChosenForJob = false;
+    this.state.jobIndex = 0;
+    this.state.active = 'capture';
+    this.state.production = null;
+    this.state.queuedProduction = null;
+    this.state.client = null;
+    this.state.handoffPrep = null;
+    this.state.clientCooldown = 0;
+    this.state.completed = false;
+    this.state.deliveredJobs = 0;
+    this.state.workflowBuffer = 0;
+    this.state.smoothHandoffs = 0;
+    this.state.clientUpdates = 0;
+    this.state.clientEscalations = 0;
+    this.state.stageFailures = 0;
+    this.state.lastOutcome = null;
+    this.state.pressures = initialPressures(0, 0);
+    this.state.deadline = this.currentBrief().deadline;
   }
 
   public preflightSignals(): string[] {
