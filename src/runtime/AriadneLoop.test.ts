@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { AriadneLoop, JOB_BRIEFS, STAGE_ORDER, WORK_DURATION } from './AriadneLoop';
+import {
+  AriadneLoop,
+  HANDOFF_PREP_DURATION,
+  JOB_BRIEFS,
+  STAGE_ORDER,
+  WORK_DURATION,
+} from './AriadneLoop';
 
 function finishActiveStage(loop: AriadneLoop): void {
   const station = loop.state.active;
@@ -55,19 +61,48 @@ describe('AriadneLoop', () => {
     expect(loop.dispatch('edit')).toEqual({ type: 'handoff-not-ready', station: 'capture', next: 'edit' });
   });
 
-  it('lets the player pre-assign the next stage and starts it automatically', () => {
+  it('makes pre-assignment a visible assistant task before automatic handoff', () => {
     const loop = new AriadneLoop();
 
     loop.dispatch('capture');
     loop.reachProductionStation();
-    expect(loop.dispatch('edit')).toEqual({ type: 'production-queued', station: 'edit' });
-    expect(loop.dispatch('edit')).toEqual({ type: 'production-queue-busy', station: 'edit' });
+    expect(loop.dispatch('edit')).toEqual({ type: 'handoff-prep-assigned', station: 'edit' });
+    expect(loop.state.queuedProduction).toBeNull();
+    expect(loop.dispatch('edit')).toEqual({ type: 'handoff-prep-busy', station: 'edit' });
+
+    loop.reachHandoffStation();
+    const prepEvents = loop.tick(HANDOFF_PREP_DURATION + 0.1);
+    expect(prepEvents).toContainEqual({ type: 'handoff-prepared', station: 'edit' });
+    expect(loop.state.queuedProduction).toBe('edit');
 
     const events = loop.tick(WORK_DURATION.capture + 0.1);
 
     expect(events).toContainEqual({ type: 'production-complete', station: 'capture', next: 'edit', autoStarted: true });
     finishActiveStage(loop);
     expect(loop.state.active).toBe('delivery');
+  });
+
+  it('forces a choice between preparing the handoff and replying to the client', () => {
+    const loop = new AriadneLoop();
+
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    expect(loop.dispatch('edit')).toEqual({ type: 'handoff-prep-assigned', station: 'edit' });
+    expect(loop.dispatch('client')).toEqual({ type: 'assistant-busy', task: 'handoff' });
+
+    loop.reachHandoffStation();
+    loop.tick(HANDOFF_PREP_DURATION + 0.1);
+    expect(loop.dispatch('client')).toEqual({ type: 'client-assigned' });
+    expect(loop.dispatch('edit')).toEqual({ type: 'production-queue-busy', station: 'edit' });
+  });
+
+  it('keeps handoff preparation unavailable while the assistant is with the client', () => {
+    const loop = new AriadneLoop();
+
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    expect(loop.dispatch('client')).toEqual({ type: 'client-assigned' });
+    expect(loop.dispatch('edit')).toEqual({ type: 'assistant-busy', task: 'client' });
   });
 
   it('stops pressure and time after delivery until the player starts another job', () => {
@@ -96,15 +131,18 @@ describe('AriadneLoop', () => {
 
     loop.dispatch('capture');
     loop.reachProductionStation();
-    expect(loop.dispatch('edit')).toEqual({ type: 'production-queued', station: 'edit' });
+    expect(loop.dispatch('edit')).toEqual({ type: 'handoff-prep-assigned', station: 'edit' });
+    loop.reachHandoffStation();
+    loop.tick(HANDOFF_PREP_DURATION + 0.1);
     expect(loop.dispatch('client')).toEqual({ type: 'client-assigned' });
     loop.reachClientStation();
-    loop.tick(3);
     loop.tick(3);
 
     expect(loop.state.active).toBe('edit');
     loop.reachProductionStation();
-    expect(loop.dispatch('delivery')).toEqual({ type: 'production-queued', station: 'delivery' });
+    expect(loop.dispatch('delivery')).toEqual({ type: 'handoff-prep-assigned', station: 'delivery' });
+    loop.reachHandoffStation();
+    loop.tick(HANDOFF_PREP_DURATION + 0.1);
     loop.tick(loop.currentWorkDuration('edit') + 0.1);
     expect(loop.state.active).toBe('delivery');
     loop.reachProductionStation();

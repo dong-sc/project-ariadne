@@ -2,6 +2,7 @@ export type StationId = 'capture' | 'edit' | 'delivery' | 'client';
 export type ProductionStationId = Exclude<StationId, 'client'>;
 export type AssignmentPhase = 'moving' | 'working';
 export type JobBriefId = 'event' | 'portrait' | 'rush';
+export type AssistantTask = 'client' | 'handoff';
 
 export interface JobBrief {
   id: JobBriefId;
@@ -36,6 +37,10 @@ export interface ClientAssignment {
   total: number;
 }
 
+export interface HandoffPreparation extends ClientAssignment {
+  station: ProductionStationId;
+}
+
 export interface LoopState {
   pressures: Record<StationId, number>;
   deadline: number;
@@ -44,6 +49,7 @@ export interface LoopState {
   production: ProductionAssignment | null;
   queuedProduction: ProductionStationId | null;
   client: ClientAssignment | null;
+  handoffPrep: HandoffPreparation | null;
   clientCooldown: number;
   completed: boolean;
   deliveredJobs: number;
@@ -57,10 +63,12 @@ export interface LoopState {
 
 export type DispatchResult =
   | { type: 'production-assigned'; station: ProductionStationId }
-  | { type: 'production-queued'; station: ProductionStationId }
+  | { type: 'handoff-prep-assigned'; station: ProductionStationId }
   | { type: 'client-assigned' }
   | { type: 'production-busy'; station: ProductionStationId }
   | { type: 'production-queue-busy'; station: ProductionStationId }
+  | { type: 'handoff-prep-busy'; station: ProductionStationId }
+  | { type: 'assistant-busy'; task: AssistantTask }
   | { type: 'handoff-not-ready'; station: ProductionStationId; next: ProductionStationId }
   | { type: 'client-busy' }
   | { type: 'client-cooling'; remaining: number }
@@ -69,6 +77,7 @@ export type DispatchResult =
 
 export type LoopEvent =
   | { type: 'production-complete'; station: ProductionStationId; next: ProductionStationId; autoStarted: boolean }
+  | { type: 'handoff-prepared'; station: ProductionStationId }
   | { type: 'delivery-complete' }
   | { type: 'client-complete' }
   | { type: 'client-escalated' }
@@ -81,7 +90,7 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
     id: 'event',
     title: '活動快訊',
     focus: '三站平衡',
-    cue: '流程平均，客戶會逐步追問',
+    cue: '風險平均，助理的第一個安排會定調',
     initialPressures: { capture: 18, edit: 5, delivery: 0, client: 16 },
     deadline: 78,
     workDuration: { capture: 5.8, edit: 7.2, delivery: 5.4 },
@@ -91,7 +100,7 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
     id: 'portrait',
     title: '品牌肖像',
     focus: '溝通優先',
-    cue: '窗口較敏感，修圖需要更多時間',
+    cue: '窗口較敏感，延後回覆會快速升溫',
     initialPressures: { capture: 12, edit: 12, delivery: 0, client: 42 },
     deadline: 84,
     workDuration: { capture: 6.4, edit: 8.8, delivery: 5.4 },
@@ -101,7 +110,7 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
     id: 'rush',
     title: '晚宴急件',
     focus: '交件優先',
-    cue: '時間較緊，交付端已經開始升溫',
+    cue: '交付端已升溫，晚準備會留下斷點',
     initialPressures: { capture: 14, edit: 8, delivery: 32, client: 12 },
     deadline: 64,
     workDuration: { capture: 5.4, edit: 7.8, delivery: 6.2 },
@@ -111,7 +120,8 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
 
 export const WORK_DURATION = JOB_BRIEFS[0]!.workDuration;
 
-const CLIENT_WORK_DURATION = 2.8;
+export const CLIENT_WORK_DURATION = 2.8;
+export const HANDOFF_PREP_DURATION = 3.2;
 const CLIENT_COOLDOWN = 8;
 
 function jobBrief(index: number): JobBrief {
@@ -138,6 +148,7 @@ export class AriadneLoop {
     production: null,
     queuedProduction: null,
     client: null,
+    handoffPrep: null,
     clientCooldown: 0,
     completed: false,
     deliveredJobs: 0,
@@ -172,6 +183,7 @@ export class AriadneLoop {
 
     if (id === 'client') {
       if (this.state.client) return { type: 'client-busy' };
+      if (this.state.handoffPrep) return { type: 'assistant-busy', task: 'handoff' };
       if (this.state.clientCooldown > 0) {
         return { type: 'client-cooling', remaining: this.state.clientCooldown };
       }
@@ -195,9 +207,16 @@ export class AriadneLoop {
       }
       if (id !== next) return { type: 'wrong-stage', expected: next };
       if (this.state.queuedProduction === id) return { type: 'production-queue-busy', station: id };
+      if (this.state.handoffPrep?.station === id) return { type: 'handoff-prep-busy', station: id };
+      if (this.state.client) return { type: 'assistant-busy', task: 'client' };
 
-      this.state.queuedProduction = id;
-      return { type: 'production-queued', station: id };
+      this.state.handoffPrep = {
+        station: id,
+        phase: 'moving',
+        remaining: HANDOFF_PREP_DURATION,
+        total: HANDOFF_PREP_DURATION,
+      };
+      return { type: 'handoff-prep-assigned', station: id };
     }
 
     if (id !== this.state.active) return { type: 'wrong-stage', expected: this.state.active };
@@ -219,6 +238,10 @@ export class AriadneLoop {
     if (this.state.client?.phase === 'moving') this.state.client.phase = 'working';
   }
 
+  public reachHandoffStation(): void {
+    if (this.state.handoffPrep?.phase === 'moving') this.state.handoffPrep.phase = 'working';
+  }
+
   public tick(dt: number): LoopEvent[] {
     if (this.state.completed || dt <= 0) return [];
 
@@ -230,15 +253,22 @@ export class AriadneLoop {
       const isNext = STAGE_ORDER.indexOf(station) === STAGE_ORDER.indexOf(this.state.active) + 1;
       const growth = isActive ? 1.18 : isNext ? 0.18 : 0;
       const workingRelief = this.state.production?.station === station && this.state.production.phase === 'working' ? -1.45 : 0;
-      this.state.pressures[station] = this.clamp(this.state.pressures[station] + dt * (growth + workingRelief));
+      const prepRelief = this.state.handoffPrep?.station === station && this.state.handoffPrep.phase === 'working' ? -0.72 : 0;
+      this.state.pressures[station] = this.clamp(this.state.pressures[station] + dt * (growth + workingRelief + prepRelief));
     }
 
     const clientGrowth = this.state.client?.phase === 'working' ? 0.35 : this.currentBrief().clientGrowth;
     this.state.pressures.client = this.clamp(this.state.pressures.client + dt * clientGrowth);
 
-    if (this.state.production?.phase === 'working') {
-      this.state.production.remaining = Math.max(0, this.state.production.remaining - dt);
-      if (this.state.production.remaining <= 0) events.push(...this.finishProduction());
+    if (this.state.handoffPrep?.phase === 'working') {
+      this.state.handoffPrep.remaining = Math.max(0, this.state.handoffPrep.remaining - dt);
+      if (this.state.handoffPrep.remaining <= 0) {
+        const station = this.state.handoffPrep.station;
+        this.state.handoffPrep = null;
+        this.state.queuedProduction = station;
+        this.state.pressures[station] = Math.max(0, this.state.pressures[station] - 10);
+        events.push({ type: 'handoff-prepared', station });
+      }
     }
 
     if (this.state.client?.phase === 'working') {
@@ -250,6 +280,11 @@ export class AriadneLoop {
         this.state.clientUpdates += 1;
         events.push({ type: 'client-complete' });
       }
+    }
+
+    if (this.state.production?.phase === 'working') {
+      this.state.production.remaining = Math.max(0, this.state.production.remaining - dt);
+      if (this.state.production.remaining <= 0) events.push(...this.finishProduction());
     }
 
     const averagePressure = this.averagePressure();
@@ -266,6 +301,7 @@ export class AriadneLoop {
       const failed = this.state.active;
       this.state.production = null;
       this.state.queuedProduction = null;
+      this.state.handoffPrep = null;
       this.state.pressures[failed] = 42;
       this.state.deadline = Math.max(18, this.state.deadline + 20);
       this.state.pressures.client = this.clamp(this.state.pressures.client + 14);
@@ -284,6 +320,7 @@ export class AriadneLoop {
     this.state.production = null;
     this.state.queuedProduction = null;
     this.state.client = null;
+    this.state.handoffPrep = null;
     this.state.clientCooldown = 0;
     this.state.completed = false;
     this.state.smoothHandoffs = 0;
@@ -308,6 +345,7 @@ export class AriadneLoop {
     if (!next) {
       this.state.production = null;
       this.state.queuedProduction = null;
+      this.state.handoffPrep = null;
       this.state.completed = true;
       this.state.deliveredJobs += 1;
       const cleanWorkflow = this.state.smoothHandoffs === 2
@@ -336,6 +374,7 @@ export class AriadneLoop {
     const autoStarted = this.state.queuedProduction === next;
     if (autoStarted) this.state.smoothHandoffs += 1;
     this.state.queuedProduction = null;
+    this.state.handoffPrep = null;
     this.state.production = autoStarted
       ? {
           station: next,

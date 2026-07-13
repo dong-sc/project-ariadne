@@ -17,7 +17,7 @@ async function bootstrap(): Promise<void> {
           <div class="metric metric-brief"><b id="job-title">活動快訊</b><span id="job-focus">1/3 · 三站平衡</span></div>
           <div class="metric"><b id="deadline">78s</b><span>截止</span></div>
           <div class="metric"><b id="studio-state">穩定</b><span>工作室</span></div>
-          <div class="metric"><b id="worker-state">待命</b><span>攝影師</span></div>
+          <div class="metric"><b id="assistant-state">待命</b><span>流程助理</span></div>
         </div>
       </header>
       <div class="game-canvas" id="game-canvas"></div>

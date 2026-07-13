@@ -69,7 +69,15 @@ export class AriadneGame {
   private readonly photographerBody = new Graphics();
   private readonly photographerHead = new Graphics();
   private readonly photographerCamera = new Graphics();
+  private readonly photographerRole = new Text({
+    text: '攝影師',
+    style: new TextStyle({ fill: 0xf4d276, fontSize: 9, fontWeight: '800', stroke: { color: 0x111620, width: 3 } }),
+  });
   private readonly assistant = new Container();
+  private readonly assistantRole = new Text({
+    text: '流程助理',
+    style: new TextStyle({ fill: 0x9edcff, fontSize: 9, fontWeight: '800', stroke: { color: 0x111620, width: 3 } }),
+  });
   private elapsed = 0;
 
   public constructor(private readonly host: HTMLDivElement) {}
@@ -202,7 +210,9 @@ export class AriadneGame {
     this.photographerHead.circle(0, -38, 11).fill({ color: 0xf0c4a4 });
     this.photographerCamera.roundRect(8, -23, 17, 12, 3).fill({ color: 0x252a31 });
     this.photographerCamera.circle(20, -17, 4).fill({ color: 0x7ab6e8 });
-    this.photographer.addChild(this.photographerBody, this.photographerHead, this.photographerCamera);
+    this.photographerRole.anchor.set(0.5);
+    this.photographerRole.position.set(0, -61);
+    this.photographer.addChild(this.photographerBody, this.photographerHead, this.photographerCamera, this.photographerRole);
     this.photographer.position.set(112, 528);
 
     const assistantBody = new Graphics();
@@ -211,7 +221,9 @@ export class AriadneGame {
     assistantHead.circle(0, -36, 10).fill({ color: 0xe8ba9d });
     const assistantTablet = new Graphics();
     assistantTablet.roundRect(7, -21, 14, 19, 3).fill({ color: 0x252a31 });
-    this.assistant.addChild(assistantBody, assistantHead, assistantTablet);
+    this.assistantRole.anchor.set(0.5);
+    this.assistantRole.position.set(0, -59);
+    this.assistant.addChild(assistantBody, assistantHead, assistantTablet, this.assistantRole);
     this.assistant.position.set(420, 520);
     this.world.addChild(this.photographer, this.assistant);
   }
@@ -237,11 +249,11 @@ export class AriadneGame {
 
   private handleDispatch(result: DispatchResult): void {
     if (result.type === 'production-assigned') {
-      this.setMessage(`已派攝影師前往${this.stationLabel(result.station)}。先看他抵達；工作開始後可預排下一站。`);
+      this.setMessage(`已派攝影師前往${this.stationLabel(result.station)}。先看他抵達；工作開始後可安排助理準備下一站。`);
       this.spawnFeedback(this.stationCenter(result.station).x, this.stationCenter(result.station).y, '已派工');
-    } else if (result.type === 'production-queued') {
-      this.setMessage(`已預排「${this.stationLabel(result.station)}」。目前工作完成後會自動交接，現在觀察客戶。`);
-      this.spawnFeedback(this.stationCenter(result.station).x, this.stationCenter(result.station).y, '已預排');
+    } else if (result.type === 'handoff-prep-assigned') {
+      this.setMessage(`已派流程助理準備「${this.stationLabel(result.station)}」。準備完成才會自動交接；這段時間客戶仍會等待。`);
+      this.spawnFeedback(this.stationCenter(result.station).x, this.stationCenter(result.station).y, '準備交接');
     } else if (result.type === 'client-assigned') {
       this.setMessage('已派助理回覆客戶。攝影師的工作會繼續進行。');
       const client = this.stationCenter('client');
@@ -249,7 +261,13 @@ export class AriadneGame {
     } else if (result.type === 'production-busy') {
       this.setMessage(`${this.stationLabel(result.station)}已經在執行。連點不會加速，請觀察下一個風險。`);
     } else if (result.type === 'production-queue-busy') {
-      this.setMessage(`${this.stationLabel(result.station)}已經排好了。這次交接不用再操心。`);
+      this.setMessage(`${this.stationLabel(result.station)}的交接已經備妥。這次不用再操心，助理可處理客戶。`);
+    } else if (result.type === 'handoff-prep-busy') {
+      this.setMessage(`流程助理正在準備${this.stationLabel(result.station)}，不需要重複派工。`);
+    } else if (result.type === 'assistant-busy') {
+      this.setMessage(result.task === 'client'
+        ? '流程助理正在回覆客戶。等她完成後，再安排下一站交接。'
+        : '流程助理正在準備交接。客戶仍在等待，準備完成後再決定是否回覆。');
     } else if (result.type === 'handoff-not-ready') {
       this.setMessage(`攝影師還在前往${this.stationLabel(result.station)}。先看移動，抵達後才能預排${this.stationLabel(result.next)}。`);
     } else if (result.type === 'client-busy') {
@@ -265,7 +283,10 @@ export class AriadneGame {
   }
 
   private handleLoopEvent(event: LoopEvent): void {
-    if (event.type === 'production-complete') {
+    if (event.type === 'handoff-prepared') {
+      this.setMessage(`${this.stationLabel(event.station)}已備妥。攝影師完成目前工作後會自動交接，流程助理現在可以回覆客戶。`);
+      this.spawnFeedback(this.stationCenter(event.station).x, this.stationCenter(event.station).y, '交接備妥');
+    } else if (event.type === 'production-complete') {
       this.setMessage(event.autoStarted
         ? `${this.stationLabel(event.station)}完成，已無縫交接${this.stationLabel(event.next)}；攝影師正在前往。`
         : `${this.stationLabel(event.station)}完成。下一個決策：派工「${this.stationLabel(event.next)}」。`);
@@ -310,17 +331,22 @@ export class AriadneGame {
     this.photographer.rotation = production?.phase === 'working' ? Math.sin(this.elapsed * 12) * 0.015 : 0;
 
     const client = this.loop.state.client;
-    const clientTarget = client ? this.stationCenter('client') : { x: 420, y: 520 };
-    const assistantTargetY = client ? clientTarget.y + 104 : clientTarget.y;
-    this.assistant.x += (clientTarget.x - this.assistant.x) * 0.12;
+    const handoffPrep = this.loop.state.handoffPrep;
+    const assistantStation = handoffPrep?.station ?? (client ? 'client' : null);
+    const assistantTarget = assistantStation ? this.stationCenter(assistantStation) : { x: 420, y: 520 };
+    const assistantTargetY = assistantStation ? assistantTarget.y + 104 : assistantTarget.y;
+    this.assistant.x += (assistantTarget.x - this.assistant.x) * 0.12;
     this.assistant.y += (assistantTargetY - this.assistant.y) * 0.12;
 
-    if (client?.phase === 'moving') {
-      const distance = Math.hypot(clientTarget.x - this.assistant.x, assistantTargetY - this.assistant.y);
-      if (distance < 8) this.loop.reachClientStation();
+    if (assistantStation) {
+      const distance = Math.hypot(assistantTarget.x - this.assistant.x, assistantTargetY - this.assistant.y);
+      if (distance < 8) {
+        if (handoffPrep?.phase === 'moving') this.loop.reachHandoffStation();
+        if (client?.phase === 'moving') this.loop.reachClientStation();
+      }
     }
 
-    if (!client) this.assistant.y += Math.sin(this.elapsed * 2.2) * 0.04;
+    if (!client && !handoffPrep) this.assistant.y += Math.sin(this.elapsed * 2.2) * 0.04;
   }
 
   private animateRoom(stress: number): void {
@@ -345,8 +371,9 @@ export class AriadneGame {
     }
 
     const client = this.loop.state.client;
-    if (client) {
-      const destination = this.stationCenter('client');
+    const handoffPrep = this.loop.state.handoffPrep;
+    if (client || handoffPrep) {
+      const destination = this.stationCenter(handoffPrep?.station ?? 'client');
       this.drawRoute(this.routeLayer, this.assistant.x, this.assistant.y - 10, destination.x, destination.y + 94, 0x9edcff);
     }
 
@@ -366,6 +393,14 @@ export class AriadneGame {
         this.actionRing
           .circle(station.x + station.width / 2, station.y + station.height / 2, 42 + Math.sin(this.elapsed * 3) * 2)
           .stroke({ color: 0x9edcff, alpha: 0.72, width: 3 });
+      }
+    }
+    if (handoffPrep) {
+      const station = this.stationById(handoffPrep.station);
+      if (station) {
+        this.actionRing
+          .circle(station.x + station.width / 2, station.y + station.height / 2, 42 + Math.sin(this.elapsed * 3) * 2)
+          .stroke({ color: 0x9edcff, alpha: 0.52, width: 2 });
       }
     }
 
@@ -427,16 +462,18 @@ export class AriadneGame {
       const pressure = this.loop.state.pressures[station.id];
       const production = this.loop.state.production;
       const client = this.loop.state.client;
+      const handoffPrep = this.loop.state.handoffPrep;
       const isActive = station.id === this.loop.state.active;
       const isWorking = production?.station === station.id;
       const isQueued = this.loop.state.queuedProduction === station.id;
+      const isPreparing = handoffPrep?.station === station.id;
       const isClientWorking = station.id === 'client' && Boolean(client);
       const risk = this.riskState(pressure);
       const statusColor = risk === 'danger' ? 0xef6676 : risk === 'busy' ? 0xe4ac55 : 0x65dc9a;
       const pulse = risk === 'danger' ? 0.78 + Math.sin(this.elapsed * 9) * 0.22 : 1;
-      const emphasized = isActive || station.id === 'client' || isWorking || isQueued;
-      const strongOutline = isWorking || isClientWorking || isQueued || risk === 'danger' || isActive;
-      const outlineColor = isQueued
+      const emphasized = isActive || station.id === 'client' || isWorking || isQueued || isPreparing;
+      const strongOutline = isWorking || isClientWorking || isQueued || isPreparing || risk === 'danger' || isActive;
+      const outlineColor = isQueued || isPreparing
         ? 0x9edcff
         : isWorking || isClientWorking
           ? 0xffffff
@@ -462,7 +499,7 @@ export class AriadneGame {
         .fill({ color: statusColor });
 
       view.progressBar.clear();
-      const assignment = isWorking ? production : isClientWorking ? client : null;
+      const assignment = isWorking ? production : isClientWorking ? client : isPreparing ? handoffPrep : null;
       if (assignment?.phase === 'working') {
         const progress = 1 - assignment.remaining / assignment.total;
         view.progressBar.roundRect(station.x + 8, station.y + station.height - 12, station.width - 16, 5, 3)
@@ -473,7 +510,7 @@ export class AriadneGame {
 
       view.label.alpha = this.loop.state.completed ? 0.64 : emphasized ? 1 : 0.58;
       view.statusLabel.text = this.stationStatus(station.id);
-      view.statusLabel.style.fill = isQueued ? 0xd7f3ff : risk === 'danger' ? 0xffc0c8 : risk === 'busy' ? 0xffd99a : 0xe6ebf3;
+      view.statusLabel.style.fill = isQueued || isPreparing ? 0xd7f3ff : risk === 'danger' ? 0xffc0c8 : risk === 'busy' ? 0xffd99a : 0xe6ebf3;
 
       const visibleDots = Math.ceil(pressure / 18);
       view.queueDots.forEach((dot, index) => {
@@ -493,19 +530,24 @@ export class AriadneGame {
       if (client?.phase === 'moving') return '助理前往';
       if (client?.phase === 'working') return `回覆 ${Math.ceil(client.remaining)}s`;
       if (this.loop.state.clientCooldown > 0) return '已更新';
+      if (this.loop.state.handoffPrep && this.loop.state.pressures.client >= 38) return '等待助理';
       return this.loop.state.pressures.client >= 38 ? '需要回覆' : '觀察中';
     }
 
     const assignment = this.loop.state.production;
+    const handoffPrep = this.loop.state.handoffPrep;
     if (assignment?.station === id) {
       return assignment.phase === 'moving' ? '前往中' : `工作 ${Math.ceil(assignment.remaining)}s`;
     }
-    if (this.loop.state.queuedProduction === id) return '已預排';
+    if (handoffPrep?.station === id) {
+      return handoffPrep.phase === 'moving' ? '助理前往' : `準備 ${Math.ceil(handoffPrep.remaining)}s`;
+    }
+    if (this.loop.state.queuedProduction === id) return '交接備妥';
     if (id === this.loop.state.active) return '點一下派工';
     const currentIndex = STAGE_ORDER.indexOf(this.loop.state.active);
     const stationIndex = STAGE_ORDER.indexOf(id);
     return stationIndex === currentIndex + 1
-      ? assignment?.phase === 'working' ? '可預排' : '下一步'
+      ? assignment?.phase === 'working' ? this.loop.state.client ? '助理忙碌' : '可準備' : '下一步'
       : stationIndex < currentIndex ? '已完成' : '等待';
   }
 
@@ -558,15 +600,21 @@ export class AriadneGame {
   private renderHud(stress: number): void {
     const production = this.loop.state.production;
     const queuedProduction = this.loop.state.queuedProduction;
+    const handoffPrep = this.loop.state.handoffPrep;
+    const client = this.loop.state.client;
     const nextProduction = this.nextProductionStation();
     const nextAction = production
       ? production.phase === 'moving'
         ? `攝影師正前往${this.stationLabel(production.station)}`
-        : queuedProduction
-          ? `${this.stationLabel(production.station)}執行中｜已預排${this.stationLabel(queuedProduction)}`
-          : nextProduction
-            ? `${this.stationLabel(production.station)}執行中｜可預排${this.stationLabel(nextProduction)}`
-            : `${this.stationLabel(production.station)}執行中｜觀察客戶`
+        : handoffPrep
+          ? `${this.stationLabel(production.station)}中｜助理準備${this.stationLabel(handoffPrep.station)}`
+          : queuedProduction
+            ? `${this.stationLabel(production.station)}中｜交接已備妥`
+            : client
+              ? `${this.stationLabel(production.station)}中｜助理回覆客戶`
+              : nextProduction
+                ? `${this.stationLabel(production.station)}中｜選擇助理下一步`
+                : `${this.stationLabel(production.station)}中｜觀察客戶`
       : this.loop.state.completed
         ? '本案完成｜工作室已安靜'
         : `下一步｜派工${this.stationLabel(this.loop.state.active)}`;
@@ -583,7 +631,11 @@ export class AriadneGame {
         : stress >= 45
           ? '忙亂'
           : this.loop.state.workflowBuffer > 0 ? '有餘裕' : '穩定');
-    this.setText('worker-state', production ? (production.phase === 'moving' ? '移動中' : '執行中') : '待命');
+    this.setText('assistant-state', handoffPrep
+      ? handoffPrep.phase === 'moving' ? '前往交接' : '準備中'
+      : client
+        ? client.phase === 'moving' ? '前往客戶' : '回覆中'
+        : '待命');
   }
 
   private completeJob(): void {
@@ -630,7 +682,7 @@ export class AriadneGame {
     if (outcome.cleanWorkflow) {
       return {
         title: '流程留下了餘裕',
-        detail: '兩次交接都有預排，也主動更新過窗口；下一案的起始壓力會更低。',
+        detail: '助理完成兩次交接準備，也主動更新過窗口；下一案的起始壓力會更低。',
       };
     }
     if (outcome.stageFailures > 0 || outcome.clientEscalations > 0) {
@@ -647,7 +699,7 @@ export class AriadneGame {
     }
     return {
       title: '本案已穩穩落地',
-      detail: '有照顧窗口，也完成交件；再多一次預排，下一案就能少一個臨場決定。',
+      detail: '有照顧窗口，也完成交件；再多一次交接準備，下一案就能少一個臨場決定。',
     };
   }
 
