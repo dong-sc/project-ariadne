@@ -165,6 +165,7 @@ export class AriadneGame {
     if (savedCampaign) this.loop.restoreCampaign(savedCampaign);
     this.setupPreflight();
     this.setupUpgrades();
+    this.renderUpgradeChoices();
     this.openPreflight();
     this.app.ticker.add((ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05)));
   }
