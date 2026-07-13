@@ -69,6 +69,7 @@ export interface RumorState {
   id: RumorId;
   phase: 'dormant' | 'active' | 'resolved' | 'escalated';
   remaining: number;
+  checkedZones: SupportZoneId[];
 }
 
 export interface SpecialistAssignment {
@@ -797,7 +798,7 @@ export class AriadneLoop {
 
   private rumorStateForJob(jobIndex: number): RumorState | null {
     const id = this.rumorPlan[jobIndex];
-    return id ? { id, phase: 'dormant', remaining: RUMOR_RESPONSE_WINDOW } : null;
+    return id ? { id, phase: 'dormant', remaining: RUMOR_RESPONSE_WINDOW, checkedZones: [] } : null;
   }
 
   private updateRumor(dt: number): LoopEvent[] {
@@ -836,6 +837,7 @@ export class AriadneLoop {
           this.state.rumorHistory.push(outcome);
           events.push({ type: 'rumor-resolved', outcome, zone: assignment.zone });
         } else {
+          if (!rumor.checkedZones.includes(assignment.zone)) rumor.checkedZones.push(assignment.zone);
           events.push({ type: 'rumor-checked', zone: assignment.zone });
         }
       }

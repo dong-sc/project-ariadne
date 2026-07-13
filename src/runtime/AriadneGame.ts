@@ -495,7 +495,10 @@ export class AriadneGame {
     if (!this.loop.state.shiftStarted) {
       rumorElement.textContent = '現場還沒有風聲';
     } else if (rumor?.phase === 'active' && rumorDefinition) {
-      rumorElement.textContent = `風聲 ${Math.ceil(rumor.remaining)}s｜${rumorDefinition.line}`;
+      const checked = rumor.checkedZones.length > 0
+        ? `已排除${rumor.checkedZones.map((zone) => this.supportZoneLabel(zone)).join('、')} · `
+        : '';
+      rumorElement.textContent = `風聲 ${Math.ceil(rumor.remaining)}s｜${checked}${rumorDefinition.line}`;
       rumorElement.classList.add('is-active');
     } else if (rumor?.phase === 'resolved') {
       rumorElement.textContent = '風聲已查清，沒有繼續擴散';
@@ -632,7 +635,7 @@ export class AriadneGame {
     } else if (event.type === 'incident-triggered') {
       this.handleIncident(event.outcome);
     } else if (event.type === 'rumor-started') {
-      this.setMessage(`團隊頻道傳來一句話：${event.rumor.line}。來源可能在側台或媒體席，派搭檔去查證。`);
+      this.setMessage(`團隊頻道傳來一句話：${event.rumor.line} 來源可能在側台或媒體席，派搭檔去查證。`);
       this.spawnFeedback(260, 278, '風聲出現');
     } else if (event.type === 'rumor-checked') {
       this.setMessage(`${this.supportZoneLabel(event.zone)}沒有找到這句話的來源。搭檔已回來，還能改查另一邊。`);
@@ -937,7 +940,7 @@ export class AriadneGame {
         : isWorking
           ? assignment?.phase === 'moving' ? '搭檔前往' : `查證 ${Math.ceil(assignment.remaining)}s`
           : rumor?.phase === 'active'
-            ? '可派搭檔'
+            ? rumor.checkedZones.includes(zone.id) ? '已排除' : '可派搭檔'
             : rumor?.phase === 'resolved'
               ? '已查清'
               : rumor?.phase === 'escalated'

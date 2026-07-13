@@ -298,6 +298,7 @@ describe('AriadneLoop', () => {
     const checked = loop.tick(1.9);
     expect(checked).toContainEqual({ type: 'rumor-checked', zone: 'backstage' });
     expect(loop.state.currentRumor?.phase).toBe('active');
+    expect(loop.state.currentRumor?.checkedZones).toEqual(['backstage']);
 
     const deadlineBefore = loop.state.deadline;
     const escalated = loop.tick(12);
