@@ -46,6 +46,7 @@ async function bootstrap(): Promise<void> {
           <span>今晚和誰搭檔</span>
           <div class="specialist-grid" id="specialist-grid"></div>
         </div>
+        <div class="career-ledger" id="career-ledger">生涯尚未定型｜每個工作日都會留下方向與代價</div>
         <button id="start-shift" type="button" disabled>收好兩樣，出發</button>
       </section>
       <div class="completion" id="completion" role="status" aria-live="polite">
@@ -70,6 +71,11 @@ async function bootstrap(): Promise<void> {
           <span>SOP INVESTMENT · 把一次經驗留下來</span>
           <small id="upgrade-copy">交件後選一處改善，下一案就少一點臨場負擔。</small>
           <div class="upgrade-grid" id="upgrade-grid"></div>
+        </div>
+        <div class="career-panel is-hidden" id="career-panel">
+          <span>CAREER CROSSROAD · 今天留下什麼</span>
+          <small id="career-copy">選一條路帶進明天。每個好處，都會帶著一筆代價。</small>
+          <div class="career-grid" id="career-grid"></div>
         </div>
         <button id="next-job" type="button">準備好，再接下一案</button>
       </div>

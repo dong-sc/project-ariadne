@@ -63,6 +63,7 @@ body { overflow: hidden; }
 .equipment-option small { margin-top: 4px; color: #8f9bad; font-size: 9px; line-height: 1.3; }
 .equipment-option.is-selected { border-color: rgba(158,220,255,.68); background: rgba(54,104,132,.28); box-shadow: inset 0 0 0 1px rgba(158,220,255,.12); }
 .preflight > small { margin: 9px 0 7px; color: #8d98a9; font-size: 9px; }
+.career-ledger { margin: 0 0 10px; padding: 7px 9px; border: 1px solid rgba(215,168,230,.18); border-radius: 10px; color: #cbb8d0; background: rgba(55,30,66,.18); font-size: 8px; line-height: 1.4; }
 .crew-pick { margin: 4px 0 10px; }
 .crew-pick > span { display: block; margin-bottom: 6px; color: #c6d0df; font-size: 9px; font-weight: 800; letter-spacing: .08em; }
 .specialist-grid { display: grid; gap: 6px; }
@@ -108,6 +109,19 @@ body { overflow: hidden; }
 .upgrade-option.is-selected { border-color: rgba(101,220,154,.5); color: #aaf0c5; background: rgba(27,72,51,.4); }
 .upgrade-option:disabled { cursor: default; opacity: .48; }
 .upgrade-panel.is-hidden { display: none; }
+.career-panel { margin: 0 0 12px; padding: 10px 11px; border: 1px solid rgba(215,168,230,.24); border-radius: 12px; background: rgba(55,30,66,.22); text-align: left; }
+.career-panel > span { display: block; color: #d9a9e5; font-size: 7px; font-weight: 900; letter-spacing: .12em; }
+.career-panel > small { display: block; margin: 4px 0 8px; color: #aa9aad; font-size: 8px; line-height: 1.4; }
+.career-grid { display: grid; gap: 6px; }
+.career-option { width: 100%; padding: 8px 9px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; color: #e5dce8; background: rgba(255,255,255,.04); font: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
+.career-option b,.career-option small { display: block; }
+.career-option b { font-size: 10px; }
+.career-option small { margin-top: 3px; font-size: 8px; line-height: 1.35; }
+.career-gain { color: #aaf0c5; }
+.career-debt { color: #e2b5a8; }
+.career-option.is-selected { border-color: rgba(215,168,230,.6); background: rgba(85,49,96,.42); }
+.career-option:disabled { cursor: default; opacity: .62; }
+.career-panel.is-hidden { display: none; }
 .completion button { width: 100%; min-height: 44px; border: 1px solid rgba(244,210,118,.48); border-radius: 13px; color: #17191d; background: #f3cf6c; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; touch-action: manipulation; }
 .completion > button:disabled { color: #7d7664; background: #3a3832; cursor: default; opacity: .7; }
 .completion button:active { transform: translateY(1px); }

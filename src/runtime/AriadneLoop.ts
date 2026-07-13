@@ -9,6 +9,20 @@ export type SupportZoneId = 'backstage' | 'media';
 export type SpecialistId = 'stage-documentary' | 'news-desk' | 'people-first';
 export type UpgradeZoneId = StationId;
 export type RumorId = 'group-photo-drift' | 'ten-photo-myth' | 'vip-no-photo' | 'raw-files-now';
+export type CareerChoiceId = 'craft' | 'network' | 'leverage';
+
+export interface CareerTracks {
+  craft: number;
+  network: number;
+  leverage: number;
+}
+
+export interface CareerChoiceDefinition {
+  id: CareerChoiceId;
+  label: string;
+  gain: string;
+  debt: string;
+}
 
 export interface EquipmentDefinition {
   id: EquipmentId;
@@ -103,6 +117,7 @@ export interface JobOutcome {
 export interface CampaignProgress {
   shiftNumber: number;
   zoneUpgrades: Record<UpgradeZoneId, number>;
+  careerTracks?: CareerTracks;
 }
 
 export interface ProductionAssignment {
@@ -155,6 +170,8 @@ export interface LoopState {
   zoneUpgrades: Record<UpgradeZoneId, number>;
   upgradeChosenForJob: boolean;
   shiftNumber: number;
+  careerTracks: CareerTracks;
+  careerChoiceForShift: CareerChoiceId | null;
 }
 
 export type DispatchResult =
@@ -383,6 +400,27 @@ const LOADOUT_SIZE = 2;
 const RUMOR_RESPONSE_WINDOW = 13;
 const SUPPORT_WORK_DURATION = 3;
 
+export const CAREER_CHOICES: readonly CareerChoiceDefinition[] = [
+  {
+    id: 'craft',
+    label: '技術流',
+    gain: '製作更穩、更快',
+    debt: '鑽研會吃掉休息，隔天截止更緊',
+  },
+  {
+    id: 'network',
+    label: '人脈流',
+    gain: '風聲更早留下查證空間',
+    debt: '人情債讓客戶期待升得更快',
+  },
+  {
+    id: 'leverage',
+    label: '情勒流',
+    gain: '窗口更快被安撫',
+    debt: '團隊信任受損，交接準備變慢',
+  },
+];
+
 const INCIDENT_POOLS: Readonly<Record<JobBriefId, readonly IncidentId[]>> = {
   event: ['schedule-drift', 'shutter-failure', 'reader-crawl'],
   portrait: ['shutter-failure', 'schedule-drift', 'dead-wifi'],
@@ -486,6 +524,8 @@ export class AriadneLoop {
     zoneUpgrades: { capture: 0, edit: 0, delivery: 0, client: 0 },
     upgradeChosenForJob: false,
     shiftNumber: 1,
+    careerTracks: { craft: 0, network: 0, leverage: 0 },
+    careerChoiceForShift: null,
   };
 
   public constructor(private readonly rng: () => number = Math.random) {}
@@ -507,7 +547,16 @@ export class AriadneLoop {
 
   public currentWorkDuration(station: ProductionStationId): number {
     const reductions: Record<ProductionStationId, number> = { capture: 0.7, edit: 1, delivery: 0.8 };
-    return Math.max(3.5, this.currentBrief().workDuration[station] - this.state.zoneUpgrades[station] * reductions[station]);
+    const craftRelief = this.state.careerTracks.craft * 0.28;
+    return Math.max(3.5, this.currentBrief().workDuration[station] - this.state.zoneUpgrades[station] * reductions[station] - craftRelief);
+  }
+
+  public clientWorkDuration(): number {
+    return Math.max(1.8, CLIENT_WORK_DURATION - this.state.careerTracks.leverage * 0.18);
+  }
+
+  public handoffWorkDuration(): number {
+    return HANDOFF_PREP_DURATION + this.state.careerTracks.leverage * 0.22;
   }
 
   public isShiftComplete(): boolean {
@@ -519,6 +568,7 @@ export class AriadneLoop {
   public prepareShift(): void {
     this.state.shiftNumber = 1;
     this.state.zoneUpgrades = { capture: 0, edit: 0, delivery: 0, client: 0 };
+    this.state.careerTracks = { craft: 0, network: 0, leverage: 0 };
     this.setupShift();
   }
 
@@ -535,8 +585,16 @@ export class AriadneLoop {
     for (const zone of zones) {
       this.state.zoneUpgrades[zone] = Math.max(0, Math.min(2, Math.floor(progress.zoneUpgrades[zone])));
     }
+    const restoredTracks = progress.careerTracks ?? { craft: 0, network: 0, leverage: 0 };
+    for (const choice of CAREER_CHOICES) {
+      const level = restoredTracks[choice.id];
+      this.state.careerTracks[choice.id] = Number.isFinite(level)
+        ? Math.max(0, Math.min(4, Math.floor(level)))
+        : 0;
+    }
     this.state.pressures = initialPressures(this.state.jobIndex, this.state.workflowBuffer);
-    this.state.deadline = this.currentBrief().deadline;
+    this.applyCareerOpeningPressure();
+    this.state.deadline = this.careerAdjustedDeadline();
     return true;
   }
 
@@ -544,7 +602,16 @@ export class AriadneLoop {
     return {
       shiftNumber: this.state.shiftNumber,
       zoneUpgrades: { ...this.state.zoneUpgrades },
+      careerTracks: { ...this.state.careerTracks },
     };
+  }
+
+  public applyCareerChoice(choice: CareerChoiceId): boolean {
+    if (!this.isShiftComplete() || this.state.careerChoiceForShift) return false;
+    if (!(choice in this.state.careerTracks)) return false;
+    this.state.careerTracks[choice] = Math.min(4, this.state.careerTracks[choice] + 1);
+    this.state.careerChoiceForShift = choice;
+    return true;
   }
 
   private setupShift(): void {
@@ -565,6 +632,7 @@ export class AriadneLoop {
     this.state.rumorHistory = [];
     this.state.jobElapsed = 0;
     this.state.upgradeChosenForJob = false;
+    this.state.careerChoiceForShift = null;
     this.state.jobIndex = 0;
     this.state.active = 'capture';
     this.state.production = null;
@@ -581,7 +649,8 @@ export class AriadneLoop {
     this.state.stageFailures = 0;
     this.state.lastOutcome = null;
     this.state.pressures = initialPressures(0, 0);
-    this.state.deadline = this.currentBrief().deadline;
+    this.applyCareerOpeningPressure();
+    this.state.deadline = this.careerAdjustedDeadline();
   }
 
   public preflightSignals(): string[] {
@@ -678,8 +747,8 @@ export class AriadneLoop {
 
       this.state.client = {
         phase: 'moving',
-        remaining: CLIENT_WORK_DURATION,
-        total: CLIENT_WORK_DURATION,
+        remaining: this.clientWorkDuration(),
+        total: this.clientWorkDuration(),
       };
       return { type: 'client-assigned' };
     }
@@ -701,8 +770,8 @@ export class AriadneLoop {
       this.state.handoffPrep = {
         station: id,
         phase: 'moving',
-        remaining: HANDOFF_PREP_DURATION,
-        total: HANDOFF_PREP_DURATION,
+        remaining: this.handoffWorkDuration(),
+        total: this.handoffWorkDuration(),
       };
       return { type: 'handoff-prep-assigned', station: id };
     }
@@ -749,9 +818,10 @@ export class AriadneLoop {
     }
 
     const clientUpgradeMultiplier = Math.pow(0.86, this.state.zoneUpgrades.client);
+    const networkExpectation = this.state.careerTracks.network * 0.06;
     const clientGrowth = this.state.client?.phase === 'working'
       ? 0.35
-      : this.currentBrief().clientGrowth * clientUpgradeMultiplier;
+      : this.currentBrief().clientGrowth * clientUpgradeMultiplier + networkExpectation;
     this.state.pressures.client = this.clamp(this.state.pressures.client + dt * clientGrowth);
 
     if (this.state.handoffPrep?.phase === 'working') {
@@ -770,7 +840,8 @@ export class AriadneLoop {
       if (this.state.client.remaining <= 0) {
         this.state.client = null;
         this.state.clientCooldown = CLIENT_COOLDOWN;
-        this.state.pressures.client = Math.max(0, this.state.pressures.client - 52);
+        const leverageRelief = this.state.careerTracks.leverage * 4;
+        this.state.pressures.client = Math.max(0, this.state.pressures.client - 52 - leverageRelief);
         this.state.clientUpdates += 1;
         events.push({ type: 'client-complete' });
       }
@@ -811,7 +882,8 @@ export class AriadneLoop {
   public startNextJob(): void {
     this.state.jobIndex = (this.state.jobIndex + 1) % JOB_BRIEFS.length;
     this.state.pressures = initialPressures(this.state.jobIndex, this.state.workflowBuffer);
-    this.state.deadline = this.currentBrief().deadline + this.state.workflowBuffer * 4;
+    this.applyCareerOpeningPressure();
+    this.state.deadline = this.careerAdjustedDeadline() + this.state.workflowBuffer * 4;
     this.state.active = 'capture';
     this.state.production = null;
     this.state.queuedProduction = null;
@@ -877,7 +949,8 @@ export class AriadneLoop {
 
   private rumorStateForJob(jobIndex: number): RumorState | null {
     const id = this.rumorPlan[jobIndex];
-    return id ? { id, phase: 'dormant', remaining: RUMOR_RESPONSE_WINDOW, checkedZones: [] } : null;
+    const networkWindow = this.state.careerTracks.network * 0.7;
+    return id ? { id, phase: 'dormant', remaining: RUMOR_RESPONSE_WINDOW + networkWindow, checkedZones: [] } : null;
   }
 
   private updateRumor(dt: number): LoopEvent[] {
@@ -1013,5 +1086,14 @@ export class AriadneLoop {
 
   private clamp(value: number): number {
     return Math.max(0, Math.min(100, value));
+  }
+
+  private careerAdjustedDeadline(): number {
+    return Math.max(30, this.currentBrief().deadline - this.state.careerTracks.craft * 0.8);
+  }
+
+  private applyCareerOpeningPressure(): void {
+    const accessRelief = this.state.careerTracks.network * 2;
+    this.state.pressures.client = Math.max(0, this.state.pressures.client - accessRelief);
   }
 }

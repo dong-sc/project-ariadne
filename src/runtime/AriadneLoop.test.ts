@@ -13,7 +13,16 @@ function finishActiveStage(loop: AriadneLoop): void {
     expect(loop.dispatch(station)).toEqual({ type: 'production-assigned', station });
   }
   loop.reachProductionStation();
-  loop.tick(WORK_DURATION[station] + 0.1);
+  loop.tick(loop.currentWorkDuration(station) + 0.1);
+}
+
+function finishWorkday(loop: AriadneLoop): void {
+  for (let job = 0; job < JOB_BRIEFS.length; job += 1) {
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    if (job < JOB_BRIEFS.length - 1) loop.startNextJob();
+  }
 }
 
 describe('AriadneLoop', () => {
@@ -356,6 +365,38 @@ describe('AriadneLoop', () => {
     expect(loop.campaignProgress()).toEqual({
       shiftNumber: 3,
       zoneUpgrades: { capture: 2, edit: 1, delivery: 0, client: 2 },
+      careerTracks: { craft: 0, network: 0, leverage: 0 },
     });
+  });
+
+  it('turns shift clear into one persistent career gain with a visible debt', () => {
+    const loop = new AriadneLoop(() => 0);
+    finishWorkday(loop);
+
+    expect(loop.isShiftComplete()).toBe(true);
+    expect(loop.applyCareerChoice('network')).toBe(true);
+    expect(loop.applyCareerChoice('craft')).toBe(false);
+    expect(loop.campaignProgress().careerTracks).toEqual({ craft: 0, network: 1, leverage: 0 });
+
+    loop.prepareNextShift();
+
+    expect(loop.state.careerTracks.network).toBe(1);
+    expect(loop.state.pressures.client).toBe(14);
+    expect(loop.state.careerChoiceForShift).toBeNull();
+  });
+
+  it('applies both the capability and debt of career direction', () => {
+    const loop = new AriadneLoop();
+    loop.prepareShift();
+    expect(loop.restoreCampaign({
+      shiftNumber: 4,
+      zoneUpgrades: { capture: 0, edit: 0, delivery: 0, client: 0 },
+      careerTracks: { craft: 2, network: 1, leverage: 2 },
+    })).toBe(true);
+
+    expect(loop.currentWorkDuration('capture')).toBeCloseTo(JOB_BRIEFS[0]!.workDuration.capture - 0.56);
+    expect(loop.clientWorkDuration()).toBeCloseTo(2.44);
+    expect(loop.handoffWorkDuration()).toBeCloseTo(HANDOFF_PREP_DURATION + 0.44);
+    expect(loop.state.deadline).toBeCloseTo(loop.currentBrief().deadline - 1.6);
   });
 });

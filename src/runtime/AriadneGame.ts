@@ -1,11 +1,13 @@
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
 import {
   AriadneLoop,
+  CAREER_CHOICES,
   EQUIPMENT,
   JOB_BRIEFS,
   SPECIALISTS,
   STAGE_ORDER,
   type CampaignProgress,
+  type CareerChoiceId,
   type DispatchResult,
   type EquipmentId,
   type IncidentOutcome,
@@ -165,7 +167,9 @@ export class AriadneGame {
     if (savedCampaign) this.loop.restoreCampaign(savedCampaign);
     this.setupPreflight();
     this.setupUpgrades();
+    this.setupCareerChoices();
     this.renderUpgradeChoices();
+    this.renderCareerState();
     this.openPreflight();
     this.app.ticker.add((ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05)));
   }
@@ -408,6 +412,7 @@ export class AriadneGame {
     this.renderPreflightSelection();
     this.renderLoadout();
     this.renderCrewState();
+    this.renderCareerState();
   }
 
   private toggleEquipment(id: EquipmentId): void {
@@ -495,6 +500,55 @@ export class AriadneGame {
       button.disabled = this.loop.state.upgradeChosenForJob || level >= 2;
       const label = button.querySelector('b');
       if (label) label.textContent = `${UPGRADE_COPY[zone].label} · L${level}`;
+    });
+  }
+
+  private setupCareerChoices(): void {
+    const grid = document.querySelector<HTMLDivElement>('#career-grid');
+    if (!grid) return;
+    grid.replaceChildren(...CAREER_CHOICES.map((choice) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'career-option';
+      button.dataset.career = choice.id;
+      const label = document.createElement('b');
+      label.textContent = choice.label;
+      const gain = document.createElement('small');
+      gain.className = 'career-gain';
+      gain.textContent = `得到｜${choice.gain}`;
+      const debt = document.createElement('small');
+      debt.className = 'career-debt';
+      debt.textContent = `代價｜${choice.debt}`;
+      button.append(label, gain, debt);
+      button.addEventListener('click', () => this.chooseCareer(choice.id));
+      return button;
+    }));
+  }
+
+  private chooseCareer(choice: CareerChoiceId): void {
+    if (!this.loop.applyCareerChoice(choice)) return;
+    this.saveCampaign();
+    const selected = CAREER_CHOICES.find((item) => item.id === choice);
+    this.setText('career-copy', `${selected?.label ?? '這條路'}會跟著你進入明天；能力留下，代價也不會消失。`);
+    this.renderCareerState();
+    const next = document.querySelector<HTMLButtonElement>('#next-job');
+    if (next) next.disabled = false;
+  }
+
+  private renderCareerState(): void {
+    const tracks = this.loop.state.careerTracks;
+    const total = tracks.craft + tracks.network + tracks.leverage;
+    this.setText('career-ledger', total === 0
+      ? '生涯尚未定型｜每個工作日都會留下方向與代價'
+      : `生涯足跡｜技術 ${tracks.craft} · 人脈 ${tracks.network} · 情勒 ${tracks.leverage}`);
+    document.querySelectorAll<HTMLButtonElement>('.career-option').forEach((button) => {
+      const choice = button.dataset.career as CareerChoiceId;
+      const selected = this.loop.state.careerChoiceForShift === choice;
+      button.classList.toggle('is-selected', selected);
+      button.disabled = Boolean(this.loop.state.careerChoiceForShift);
+      const label = button.querySelector('b');
+      const definition = CAREER_CHOICES.find((item) => item.id === choice);
+      if (label && definition) label.textContent = `${definition.label} · ${tracks[choice]}/4`;
     });
   }
 
@@ -1145,10 +1199,16 @@ export class AriadneGame {
 
     const upgradePanel = document.querySelector('#upgrade-panel');
     upgradePanel?.classList.toggle('is-hidden', shiftComplete);
+    const careerPanel = document.querySelector('#career-panel');
+    careerPanel?.classList.toggle('is-hidden', !shiftComplete);
     this.setText('upgrade-copy', '交件後選一處改善，下一案就少一點臨場負擔。');
+    this.setText('career-copy', '選一條路帶進明天。每個好處，都會帶著一筆代價。');
     this.renderUpgradeChoices();
+    this.renderCareerState();
     const nextButton = document.querySelector<HTMLButtonElement>('#next-job');
-    if (nextButton) nextButton.disabled = !shiftComplete;
+    if (nextButton) nextButton.disabled = shiftComplete
+      ? !this.loop.state.careerChoiceForShift
+      : !this.loop.state.upgradeChosenForJob;
 
     this.spawnFeedback(260, 310, shiftComplete ? '今日收工' : '完成交件');
     document.querySelector('.game-shell')?.classList.add('is-complete');
