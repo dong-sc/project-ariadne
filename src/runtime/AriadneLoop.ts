@@ -20,6 +20,7 @@ export interface LoopState {
   deadline: number;
   active: ProductionStationId;
   production: ProductionAssignment | null;
+  queuedProduction: ProductionStationId | null;
   client: ClientAssignment | null;
   clientCooldown: number;
   completed: boolean;
@@ -28,15 +29,18 @@ export interface LoopState {
 
 export type DispatchResult =
   | { type: 'production-assigned'; station: ProductionStationId }
+  | { type: 'production-queued'; station: ProductionStationId }
   | { type: 'client-assigned' }
   | { type: 'production-busy'; station: ProductionStationId }
+  | { type: 'production-queue-busy'; station: ProductionStationId }
+  | { type: 'handoff-not-ready'; station: ProductionStationId; next: ProductionStationId }
   | { type: 'client-busy' }
   | { type: 'client-cooling'; remaining: number }
   | { type: 'wrong-stage'; expected: ProductionStationId }
   | { type: 'job-complete' };
 
 export type LoopEvent =
-  | { type: 'production-complete'; station: ProductionStationId; next: ProductionStationId }
+  | { type: 'production-complete'; station: ProductionStationId; next: ProductionStationId; autoStarted: boolean }
   | { type: 'delivery-complete' }
   | { type: 'client-complete' }
   | { type: 'client-escalated' }
@@ -63,6 +67,7 @@ export class AriadneLoop {
     deadline: 78,
     active: 'capture',
     production: null,
+    queuedProduction: null,
     client: null,
     clientCooldown: 0,
     completed: false,
@@ -86,10 +91,23 @@ export class AriadneLoop {
       return { type: 'client-assigned' };
     }
 
-    if (id !== this.state.active) return { type: 'wrong-stage', expected: this.state.active };
-    if (this.state.production) {
-      return { type: 'production-busy', station: this.state.production.station };
+    const production = this.state.production;
+    if (production) {
+      if (id === production.station) return { type: 'production-busy', station: production.station };
+
+      const next = STAGE_ORDER[STAGE_ORDER.indexOf(this.state.active) + 1];
+      if (!next) return { type: 'wrong-stage', expected: this.state.active };
+      if (production.phase === 'moving') {
+        return { type: 'handoff-not-ready', station: production.station, next };
+      }
+      if (id !== next) return { type: 'wrong-stage', expected: next };
+      if (this.state.queuedProduction === id) return { type: 'production-queue-busy', station: id };
+
+      this.state.queuedProduction = id;
+      return { type: 'production-queued', station: id };
     }
+
+    if (id !== this.state.active) return { type: 'wrong-stage', expected: this.state.active };
 
     this.state.production = {
       station: id,
@@ -152,6 +170,7 @@ export class AriadneLoop {
     if (this.state.pressures[this.state.active] >= 100 || this.state.deadline <= 0) {
       const failed = this.state.active;
       this.state.production = null;
+      this.state.queuedProduction = null;
       this.state.pressures[failed] = 42;
       this.state.deadline = Math.max(18, this.state.deadline + 20);
       this.state.pressures.client = this.clamp(this.state.pressures.client + 14);
@@ -166,6 +185,7 @@ export class AriadneLoop {
     this.state.deadline = 78;
     this.state.active = 'capture';
     this.state.production = null;
+    this.state.queuedProduction = null;
     this.state.client = null;
     this.state.clientCooldown = 0;
     this.state.completed = false;
@@ -181,11 +201,12 @@ export class AriadneLoop {
     if (!completed) return [];
 
     this.state.pressures[completed] = Math.max(0, this.state.pressures[completed] - 44);
-    this.state.production = null;
     const index = STAGE_ORDER.indexOf(completed);
     const next = STAGE_ORDER[index + 1];
 
     if (!next) {
+      this.state.production = null;
+      this.state.queuedProduction = null;
       this.state.completed = true;
       this.state.deliveredJobs += 1;
       this.state.client = null;
@@ -196,7 +217,12 @@ export class AriadneLoop {
 
     this.state.active = next;
     this.state.deadline += 10;
-    return [{ type: 'production-complete', station: completed, next }];
+    const autoStarted = this.state.queuedProduction === next;
+    this.state.queuedProduction = null;
+    this.state.production = autoStarted
+      ? { station: next, phase: 'moving', remaining: WORK_DURATION[next], total: WORK_DURATION[next] }
+      : null;
+    return [{ type: 'production-complete', station: completed, next, autoStarted }];
   }
 
   private clamp(value: number): number {

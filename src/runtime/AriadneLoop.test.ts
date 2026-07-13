@@ -3,7 +3,9 @@ import { AriadneLoop, WORK_DURATION } from './AriadneLoop';
 
 function finishActiveStage(loop: AriadneLoop): void {
   const station = loop.state.active;
-  expect(loop.dispatch(station)).toEqual({ type: 'production-assigned', station });
+  if (!loop.state.production) {
+    expect(loop.dispatch(station)).toEqual({ type: 'production-assigned', station });
+  }
   loop.reachProductionStation();
   loop.tick(WORK_DURATION[station] + 0.1);
 }
@@ -45,12 +47,27 @@ describe('AriadneLoop', () => {
     expect(loop.state.clientCooldown).toBeGreaterThan(0);
   });
 
-  it('keeps future production stages locked until the current stage is complete', () => {
+  it('keeps the handoff locked until the photographer starts work', () => {
     const loop = new AriadneLoop();
 
     expect(loop.dispatch('edit')).toEqual({ type: 'wrong-stage', expected: 'capture' });
+    expect(loop.dispatch('capture')).toEqual({ type: 'production-assigned', station: 'capture' });
+    expect(loop.dispatch('edit')).toEqual({ type: 'handoff-not-ready', station: 'capture', next: 'edit' });
+  });
+
+  it('lets the player pre-assign the next stage and starts it automatically', () => {
+    const loop = new AriadneLoop();
+
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    expect(loop.dispatch('edit')).toEqual({ type: 'production-queued', station: 'edit' });
+    expect(loop.dispatch('edit')).toEqual({ type: 'production-queue-busy', station: 'edit' });
+
+    const events = loop.tick(WORK_DURATION.capture + 0.1);
+
+    expect(events).toContainEqual({ type: 'production-complete', station: 'capture', next: 'edit', autoStarted: true });
     finishActiveStage(loop);
-    expect(loop.state.active).toBe('edit');
+    expect(loop.state.active).toBe('delivery');
   });
 
   it('stops pressure and time after delivery until the player starts another job', () => {
