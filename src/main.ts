@@ -22,6 +22,9 @@ async function bootstrap(): Promise<void> {
         <div class="loadout-strip" id="loadout-strip" aria-label="本輪隨身裝備">
           <span>隨身</span><b id="loadout-one">尚未整備</b><b id="loadout-two">—</b>
         </div>
+        <div class="crew-strip" aria-live="polite">
+          <span>搭檔</span><b id="crew-specialist">尚未選人</b><i id="field-rumor">現場還沒有風聲</i>
+        </div>
       </header>
       <div class="game-canvas" id="game-canvas"></div>
       <section class="preflight" id="preflight" aria-labelledby="preflight-title">
@@ -31,6 +34,10 @@ async function bootstrap(): Promise<void> {
         <ul id="field-signals" class="field-signals"></ul>
         <div class="equipment-grid" id="equipment-grid"></div>
         <small id="preflight-count">已選 0/2 · 留下什麼，也是一個決定</small>
+        <div class="crew-pick">
+          <span>今晚和誰搭檔</span>
+          <div class="specialist-grid" id="specialist-grid"></div>
+        </div>
         <button id="start-shift" type="button" disabled>收好兩樣，出發</button>
       </section>
       <div class="completion" id="completion" role="status" aria-live="polite">
@@ -45,6 +52,16 @@ async function bootstrap(): Promise<void> {
           <span>FIELD NOTE · 現場留下的痕跡</span>
           <b id="incident-title">今晚沒有足夠資料</b>
           <small id="incident-detail">有些風險只能在真正發生後被看見。</small>
+        </div>
+        <div class="rumor-debrief">
+          <span>TEAM CHAT · 大拜拜留下的話</span>
+          <b id="rumor-title">現場暫時沒有耳語</b>
+          <small id="rumor-detail">真正麻煩的，常常不是工作，而是沒有人確認過的話。</small>
+        </div>
+        <div class="upgrade-panel" id="upgrade-panel">
+          <span>SOP INVESTMENT · 把一次經驗留下來</span>
+          <small id="upgrade-copy">交件後選一處改善，下一案就少一點臨場負擔。</small>
+          <div class="upgrade-grid" id="upgrade-grid"></div>
         </div>
         <button id="next-job" type="button">準備好，再接下一案</button>
       </div>

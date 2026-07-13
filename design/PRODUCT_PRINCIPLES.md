@@ -12,6 +12,9 @@
 10. The endgame fantasy is calm, not maximal noise.
 11. Events may be unpredictable; their causes must remain understandable afterward.
 12. Equipment changes what the workflow can absorb, not an abstract power score.
+13. Information travels through people and places; an unchecked sentence can become operational reality.
+14. A workflow upgrade should remove a future coordination step, not merely raise a number.
+15. Specialists create different ways to read a scene, not a rarity ladder.
 
 ## Ariadne Principle
 

@@ -5,6 +5,10 @@ export type JobBriefId = 'event' | 'portrait' | 'rush';
 export type AssistantTask = 'client' | 'handoff';
 export type EquipmentId = 'backup-body' | 'dual-reader' | 'hotspot' | 'paper-runbook';
 export type IncidentId = 'shutter-failure' | 'reader-crawl' | 'dead-wifi' | 'schedule-drift';
+export type SupportZoneId = 'backstage' | 'media';
+export type SpecialistId = 'stage-documentary' | 'news-desk' | 'people-first';
+export type UpgradeZoneId = StationId;
+export type RumorId = 'group-photo-drift' | 'ten-photo-myth' | 'vip-no-photo' | 'raw-files-now';
 
 export interface EquipmentDefinition {
   id: EquipmentId;
@@ -33,6 +37,46 @@ export interface IncidentOutcome {
   title: string;
   mitigated: boolean;
   detail: string;
+}
+
+export interface SpecialistDefinition {
+  id: SpecialistId;
+  label: string;
+  field: string;
+  passive: string;
+  favoredZone: SupportZoneId | 'client';
+}
+
+export interface RumorDefinition {
+  id: RumorId;
+  zone: SupportZoneId;
+  line: string;
+  pressureTarget: StationId;
+  pressurePenalty: number;
+  deadlinePenalty: number;
+  resolvedCopy: string;
+  exposedCopy: string;
+}
+
+export interface RumorOutcome {
+  rumorId: RumorId;
+  line: string;
+  resolved: boolean;
+  detail: string;
+}
+
+export interface RumorState {
+  id: RumorId;
+  phase: 'dormant' | 'active' | 'resolved' | 'escalated';
+  remaining: number;
+}
+
+export interface SpecialistAssignment {
+  zone: SupportZoneId;
+  phase: AssignmentPhase;
+  remaining: number;
+  total: number;
+  rumorId: RumorId;
 }
 
 export interface JobBrief {
@@ -96,6 +140,14 @@ export interface LoopState {
   incidentTriggered: boolean;
   lastIncidentOutcome: IncidentOutcome | null;
   incidentHistory: IncidentOutcome[];
+  specialist: SpecialistId | null;
+  specialistAssignment: SpecialistAssignment | null;
+  currentRumor: RumorState | null;
+  lastRumorOutcome: RumorOutcome | null;
+  rumorHistory: RumorOutcome[];
+  jobElapsed: number;
+  zoneUpgrades: Record<UpgradeZoneId, number>;
+  upgradeChosenForJob: boolean;
 }
 
 export type DispatchResult =
@@ -120,7 +172,18 @@ export type LoopEvent =
   | { type: 'client-complete' }
   | { type: 'client-escalated' }
   | { type: 'incident-triggered'; outcome: IncidentOutcome }
+  | { type: 'rumor-started'; rumor: RumorDefinition }
+  | { type: 'rumor-checked'; zone: SupportZoneId }
+  | { type: 'rumor-resolved'; outcome: RumorOutcome; zone: SupportZoneId }
+  | { type: 'rumor-escalated'; outcome: RumorOutcome }
   | { type: 'stage-failed'; station: ProductionStationId };
+
+export type SupportDispatchResult =
+  | { type: 'specialist-assigned'; zone: SupportZoneId }
+  | { type: 'specialist-busy'; zone: SupportZoneId }
+  | { type: 'no-active-rumor' }
+  | { type: 'shift-not-started' }
+  | { type: 'job-complete' };
 
 export const STAGE_ORDER: readonly ProductionStationId[] = ['capture', 'edit', 'delivery'];
 
@@ -130,6 +193,73 @@ export const EQUIPMENT: readonly EquipmentDefinition[] = [
   { id: 'hotspot', label: '行動網路', shortLabel: '行動網路', purpose: '場館網路只有看起來正常時，保住交件' },
   { id: 'paper-runbook', label: '紙本流程表', shortLabel: '紙本流程', purpose: '口頭變更互相矛盾時，留下可核對的版本' },
 ];
+
+export const SPECIALISTS: readonly SpecialistDefinition[] = [
+  {
+    id: 'stage-documentary',
+    label: '舞台紀實攝影師',
+    field: '熟悉彩排、走位與不能重來的瞬間',
+    passive: '去側台查證更快；處理成功時額外穩住拍攝區',
+    favoredZone: 'backstage',
+  },
+  {
+    id: 'news-desk',
+    label: '即時新聞攝影師',
+    field: '懂發稿窗口、媒體需求與交件時效',
+    passive: '去媒體席查證更快；處理成功時額外穩住交件區',
+    favoredZone: 'media',
+  },
+  {
+    id: 'people-first',
+    label: '人物溝通攝影師',
+    field: '擅長在混亂關係裡找到真正能決定的人',
+    passive: '任何風聲被釐清時，都會同步降低客戶壓力',
+    favoredZone: 'client',
+  },
+];
+
+export const RUMORS: Readonly<Record<RumorId, RumorDefinition>> = {
+  'group-photo-drift': {
+    id: 'group-photo-drift',
+    zone: 'backstage',
+    line: '「大合照等等再補就好。」但三位主管已經準備離場。',
+    pressureTarget: 'capture',
+    pressurePenalty: 24,
+    deadlinePenalty: 3,
+    resolvedCopy: '側台重新確認離場順序，大合照被移回還拍得到的時間。',
+    exposedCopy: '大家都以為別人會留人，真正要拍時只剩空舞台。',
+  },
+  'ten-photo-myth': {
+    id: 'ten-photo-myth',
+    zone: 'media',
+    line: '隔壁團隊說：「主辦最後只會挑十張，不用那麼早交。」',
+    pressureTarget: 'delivery',
+    pressurePenalty: 26,
+    deadlinePenalty: 4,
+    resolvedCopy: '媒體席找到真正的發稿窗口：十張只是其中一個群組的需求。',
+    exposedCopy: '閒聊被當成規格，等新聞稿催件時才發現交付根本不只十張。',
+  },
+  'vip-no-photo': {
+    id: 'vip-no-photo',
+    zone: 'backstage',
+    line: '有人壓低聲音說：「那位長官今天不想被拍。」',
+    pressureTarget: 'client',
+    pressurePenalty: 28,
+    deadlinePenalty: 3,
+    resolvedCopy: '側台問到本人窗口：不是不拍，只是動線還沒有人說清楚。',
+    exposedCopy: '一句沒有來源的話一路傳下去，所有人都在猜該不該舉起相機。',
+  },
+  'raw-files-now': {
+    id: 'raw-files-now',
+    zone: 'media',
+    line: '公關群組突然問：「可以現在先傳未調色原檔嗎？」',
+    pressureTarget: 'edit',
+    pressurePenalty: 25,
+    deadlinePenalty: 4,
+    resolvedCopy: '媒體席對回用途，只需要三張即時預覽，不必把整批流程拆爛。',
+    exposedCopy: '一句「先傳原檔」讓選圖、調色與交件順序全部打結。',
+  },
+};
 
 export const INCIDENTS: Readonly<Record<IncidentId, IncidentDefinition>> = {
   'shutter-failure': {
@@ -189,9 +319,9 @@ export const INCIDENTS: Readonly<Record<IncidentId, IncidentDefinition>> = {
 export const JOB_BRIEFS: readonly JobBrief[] = [
   {
     id: 'event',
-    title: '活動快訊',
-    focus: '現場快報',
-    cue: '時程看起來正常，但每個窗口都只知道一部分',
+    title: '品牌發表會',
+    focus: '舞台＋媒體聯訪',
+    cue: '舞台、媒體與公關各自拿著一份看起來都正確的流程',
     initialPressures: { capture: 18, edit: 5, delivery: 0, client: 16 },
     deadline: 78,
     workDuration: { capture: 5.8, edit: 7.2, delivery: 5.4 },
@@ -199,9 +329,9 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
   },
   {
     id: 'portrait',
-    title: '品牌肖像',
-    focus: '多人確認',
-    cue: '窗口很多，真正能決定的人還沒有出現',
+    title: '年度頒獎典禮',
+    focus: '得獎人＋長官動線',
+    cue: '名單一直在改，真正能決定拍攝順序的人還沒有出現',
     initialPressures: { capture: 12, edit: 12, delivery: 0, client: 42 },
     deadline: 84,
     workDuration: { capture: 8.4, edit: 8.8, delivery: 5.4 },
@@ -209,9 +339,9 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
   },
   {
     id: 'rush',
-    title: '晚宴急件',
-    focus: '晚間交付',
-    cue: '所有人都說來得及，交件條件卻沒有人實測',
+    title: '千人晚宴',
+    focus: '晚間即時發稿',
+    cue: '所有人都說來得及，舞台、合照與發稿條件卻沒有人一起實測',
     initialPressures: { capture: 14, edit: 8, delivery: 32, client: 12 },
     deadline: 64,
     workDuration: { capture: 5.4, edit: 7.8, delivery: 6.2 },
@@ -225,6 +355,8 @@ export const CLIENT_WORK_DURATION = 2.8;
 export const HANDOFF_PREP_DURATION = 3.2;
 const CLIENT_COOLDOWN = 8;
 const LOADOUT_SIZE = 2;
+const RUMOR_RESPONSE_WINDOW = 9;
+const SUPPORT_WORK_DURATION = 3;
 
 const INCIDENT_POOLS: Readonly<Record<JobBriefId, readonly IncidentId[]>> = {
   event: ['schedule-drift', 'shutter-failure', 'reader-crawl'],
@@ -251,6 +383,10 @@ function equipmentDefinition(id: EquipmentId): EquipmentDefinition {
   return EQUIPMENT.find((item) => item.id === id) ?? EQUIPMENT[0]!;
 }
 
+function specialistDefinition(id: SpecialistId): SpecialistDefinition {
+  return SPECIALISTS.find((item) => item.id === id) ?? SPECIALISTS[0]!;
+}
+
 function createIncidentPlan(rng: () => number): IncidentId[] {
   const used = new Set<IncidentId>();
   return JOB_BRIEFS.map((brief) => {
@@ -273,9 +409,24 @@ function createSignalOrder(rng: () => number): IncidentId[] {
   return signals;
 }
 
+function shuffledIds<T>(ids: readonly T[], rng: () => number): T[] {
+  const result = [...ids];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const target = Math.min(index, Math.floor(Math.max(0, rng()) * (index + 1)));
+    [result[index], result[target]] = [result[target]!, result[index]!];
+  }
+  return result;
+}
+
+function createRumorPlan(rng: () => number): RumorId[] {
+  return shuffledIds(Object.keys(RUMORS) as RumorId[], rng).slice(0, JOB_BRIEFS.length);
+}
+
 export class AriadneLoop {
   private incidentPlan: IncidentId[] = [];
   private signalOrder: IncidentId[] = [];
+  private rumorPlan: RumorId[] = [];
+  private rumorTriggerPlan: number[] = [];
 
   public readonly state: LoopState = {
     pressures: initialPressures(0, 0),
@@ -301,6 +452,14 @@ export class AriadneLoop {
     incidentTriggered: false,
     lastIncidentOutcome: null,
     incidentHistory: [],
+    specialist: null,
+    specialistAssignment: null,
+    currentRumor: null,
+    lastRumorOutcome: null,
+    rumorHistory: [],
+    jobElapsed: 0,
+    zoneUpgrades: { capture: 0, edit: 0, delivery: 0, client: 0 },
+    upgradeChosenForJob: false,
   };
 
   public constructor(private readonly rng: () => number = Math.random) {}
@@ -314,7 +473,8 @@ export class AriadneLoop {
   }
 
   public currentWorkDuration(station: ProductionStationId): number {
-    return this.currentBrief().workDuration[station];
+    const reductions: Record<ProductionStationId, number> = { capture: 0.7, edit: 1, delivery: 0.8 };
+    return Math.max(3.5, this.currentBrief().workDuration[station] - this.state.zoneUpgrades[station] * reductions[station]);
   }
 
   public isShiftComplete(): boolean {
@@ -326,12 +486,22 @@ export class AriadneLoop {
   public prepareShift(): void {
     this.incidentPlan = createIncidentPlan(this.rng);
     this.signalOrder = createSignalOrder(this.rng);
+    this.rumorPlan = createRumorPlan(this.rng);
+    this.rumorTriggerPlan = JOB_BRIEFS.map(() => 4.2 + Math.max(0, this.rng()) * 2.6);
     this.state.shiftStarted = false;
     this.state.loadout = [];
     this.state.currentIncident = null;
     this.state.incidentTriggered = false;
     this.state.lastIncidentOutcome = null;
     this.state.incidentHistory = [];
+    this.state.specialist = null;
+    this.state.specialistAssignment = null;
+    this.state.currentRumor = null;
+    this.state.lastRumorOutcome = null;
+    this.state.rumorHistory = [];
+    this.state.jobElapsed = 0;
+    this.state.zoneUpgrades = { capture: 0, edit: 0, delivery: 0, client: 0 };
+    this.state.upgradeChosenForJob = false;
   }
 
   public preflightSignals(): string[] {
@@ -346,10 +516,22 @@ export class AriadneLoop {
     return true;
   }
 
+  public configureSpecialist(id: SpecialistId): boolean {
+    if (this.state.shiftStarted || !SPECIALISTS.some((item) => item.id === id)) return false;
+    this.state.specialist = id;
+    return true;
+  }
+
   public startShift(): boolean {
-    if (this.state.loadout.length !== LOADOUT_SIZE || this.incidentPlan.length !== JOB_BRIEFS.length) return false;
+    if (
+      this.state.loadout.length !== LOADOUT_SIZE
+      || !this.state.specialist
+      || this.incidentPlan.length !== JOB_BRIEFS.length
+      || this.rumorPlan.length !== JOB_BRIEFS.length
+    ) return false;
     this.state.shiftStarted = true;
     this.state.currentIncident = this.incidentPlan[this.state.jobIndex] ?? null;
+    this.state.currentRumor = this.rumorStateForJob(this.state.jobIndex);
     return true;
   }
 
@@ -359,6 +541,48 @@ export class AriadneLoop {
 
   public currentIncidentDefinition(): IncidentDefinition | null {
     return this.state.currentIncident ? INCIDENTS[this.state.currentIncident] : null;
+  }
+
+  public specialistDefinition(): SpecialistDefinition | null {
+    return this.state.specialist ? specialistDefinition(this.state.specialist) : null;
+  }
+
+  public currentRumorDefinition(): RumorDefinition | null {
+    return this.state.currentRumor ? RUMORS[this.state.currentRumor.id] : null;
+  }
+
+  public applyZoneUpgrade(zone: UpgradeZoneId): boolean {
+    if (!this.state.completed || this.isShiftComplete() || this.state.upgradeChosenForJob) return false;
+    if (!(zone in this.state.zoneUpgrades) || this.state.zoneUpgrades[zone] >= 2) return false;
+    this.state.zoneUpgrades[zone] += 1;
+    this.state.upgradeChosenForJob = true;
+    return true;
+  }
+
+  public dispatchSupport(zone: SupportZoneId): SupportDispatchResult {
+    if (!this.state.shiftStarted) return { type: 'shift-not-started' };
+    if (this.state.completed) return { type: 'job-complete' };
+    if (this.state.specialistAssignment) {
+      return { type: 'specialist-busy', zone: this.state.specialistAssignment.zone };
+    }
+    const rumor = this.state.currentRumor;
+    if (!rumor || rumor.phase !== 'active') return { type: 'no-active-rumor' };
+
+    const specialist = this.specialistDefinition();
+    const favored = specialist?.favoredZone === zone;
+    const duration = favored ? 1.8 : SUPPORT_WORK_DURATION;
+    this.state.specialistAssignment = {
+      zone,
+      phase: 'moving',
+      remaining: duration,
+      total: duration,
+      rumorId: rumor.id,
+    };
+    return { type: 'specialist-assigned', zone };
+  }
+
+  public reachSpecialistZone(): void {
+    if (this.state.specialistAssignment?.phase === 'moving') this.state.specialistAssignment.phase = 'working';
   }
 
   public dispatch(id: StationId): DispatchResult {
@@ -430,7 +654,10 @@ export class AriadneLoop {
     if (!this.state.shiftStarted || this.state.completed || dt <= 0) return [];
 
     const events: LoopEvent[] = [];
+    this.state.jobElapsed += dt;
     this.state.clientCooldown = Math.max(0, this.state.clientCooldown - dt);
+
+    events.push(...this.updateRumor(dt));
 
     for (const station of STAGE_ORDER) {
       const isActive = station === this.state.active;
@@ -441,7 +668,10 @@ export class AriadneLoop {
       this.state.pressures[station] = this.clamp(this.state.pressures[station] + dt * (growth + workingRelief + prepRelief));
     }
 
-    const clientGrowth = this.state.client?.phase === 'working' ? 0.35 : this.currentBrief().clientGrowth;
+    const clientUpgradeMultiplier = Math.pow(0.86, this.state.zoneUpgrades.client);
+    const clientGrowth = this.state.client?.phase === 'working'
+      ? 0.35
+      : this.currentBrief().clientGrowth * clientUpgradeMultiplier;
     this.state.pressures.client = this.clamp(this.state.pressures.client + dt * clientGrowth);
 
     if (this.state.handoffPrep?.phase === 'working') {
@@ -516,6 +746,11 @@ export class AriadneLoop {
     this.state.currentIncident = this.incidentPlan[this.state.jobIndex] ?? null;
     this.state.incidentTriggered = false;
     this.state.lastIncidentOutcome = null;
+    this.state.specialistAssignment = null;
+    this.state.currentRumor = this.rumorStateForJob(this.state.jobIndex);
+    this.state.lastRumorOutcome = null;
+    this.state.jobElapsed = 0;
+    this.state.upgradeChosenForJob = false;
   }
 
   public averagePressure(): number {
@@ -558,6 +793,89 @@ export class AriadneLoop {
     this.state.lastIncidentOutcome = outcome;
     this.state.incidentHistory.push(outcome);
     return [{ type: 'incident-triggered', outcome }];
+  }
+
+  private rumorStateForJob(jobIndex: number): RumorState | null {
+    const id = this.rumorPlan[jobIndex];
+    return id ? { id, phase: 'dormant', remaining: RUMOR_RESPONSE_WINDOW } : null;
+  }
+
+  private updateRumor(dt: number): LoopEvent[] {
+    const events: LoopEvent[] = [];
+    const rumor = this.state.currentRumor;
+    if (!rumor) return events;
+    let activatedNow = false;
+
+    const triggerAt = this.rumorTriggerPlan[this.state.jobIndex] ?? 5;
+    if (rumor.phase === 'dormant' && this.state.jobElapsed >= triggerAt) {
+      rumor.phase = 'active';
+      activatedNow = true;
+      events.push({ type: 'rumor-started', rumor: RUMORS[rumor.id] });
+    }
+
+    const assignment = this.state.specialistAssignment;
+    if (assignment?.phase === 'working') {
+      assignment.remaining = Math.max(0, assignment.remaining - dt);
+      if (assignment.remaining <= 0) {
+        this.state.specialistAssignment = null;
+        const definition = RUMORS[assignment.rumorId];
+        if (rumor.phase === 'active' && definition.zone === assignment.zone) {
+          rumor.phase = 'resolved';
+          this.state.pressures[definition.pressureTarget] = Math.max(
+            0,
+            this.state.pressures[definition.pressureTarget] - 10,
+          );
+          this.applySpecialistRelief(assignment.zone);
+          const outcome: RumorOutcome = {
+            rumorId: rumor.id,
+            line: definition.line,
+            resolved: true,
+            detail: definition.resolvedCopy,
+          };
+          this.state.lastRumorOutcome = outcome;
+          this.state.rumorHistory.push(outcome);
+          events.push({ type: 'rumor-resolved', outcome, zone: assignment.zone });
+        } else {
+          events.push({ type: 'rumor-checked', zone: assignment.zone });
+        }
+      }
+    }
+
+    if (rumor.phase === 'active' && !activatedNow) {
+      rumor.remaining = Math.max(0, rumor.remaining - dt);
+      if (rumor.remaining <= 0) {
+        const definition = RUMORS[rumor.id];
+        rumor.phase = 'escalated';
+        this.state.specialistAssignment = null;
+        this.state.pressures[definition.pressureTarget] = this.clamp(
+          this.state.pressures[definition.pressureTarget] + definition.pressurePenalty,
+        );
+        this.state.deadline = Math.max(0, this.state.deadline - definition.deadlinePenalty);
+        const outcome: RumorOutcome = {
+          rumorId: rumor.id,
+          line: definition.line,
+          resolved: false,
+          detail: definition.exposedCopy,
+        };
+        this.state.lastRumorOutcome = outcome;
+        this.state.rumorHistory.push(outcome);
+        events.push({ type: 'rumor-escalated', outcome });
+      }
+    }
+
+    return events;
+  }
+
+  private applySpecialistRelief(zone: SupportZoneId): void {
+    const specialist = this.specialistDefinition();
+    if (!specialist) return;
+    if (specialist.id === 'stage-documentary' && zone === 'backstage') {
+      this.state.pressures.capture = Math.max(0, this.state.pressures.capture - 12);
+    } else if (specialist.id === 'news-desk' && zone === 'media') {
+      this.state.pressures.delivery = Math.max(0, this.state.pressures.delivery - 12);
+    } else if (specialist.id === 'people-first') {
+      this.state.pressures.client = Math.max(0, this.state.pressures.client - 16);
+    }
   }
 
   private finishProduction(): LoopEvent[] {

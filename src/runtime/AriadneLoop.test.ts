@@ -205,6 +205,8 @@ describe('AriadneLoop', () => {
     expect(loop.configureLoadout(['backup-body'])).toBe(false);
     expect(loop.configureLoadout(['backup-body', 'hotspot', 'dual-reader'])).toBe(false);
     expect(loop.configureLoadout(['paper-runbook', 'hotspot'])).toBe(true);
+    expect(loop.startShift()).toBe(false);
+    expect(loop.configureSpecialist('stage-documentary')).toBe(true);
     expect(loop.startShift()).toBe(true);
     expect(loop.state.currentIncident).toBe('schedule-drift');
   });
@@ -213,6 +215,7 @@ describe('AriadneLoop', () => {
     const loop = new AriadneLoop(() => 0);
     loop.prepareShift();
     loop.configureLoadout(['paper-runbook', 'hotspot']);
+    loop.configureSpecialist('stage-documentary');
     loop.startShift();
     loop.dispatch('capture');
     loop.reachProductionStation();
@@ -236,6 +239,7 @@ describe('AriadneLoop', () => {
     const loop = new AriadneLoop(() => 0);
     loop.prepareShift();
     loop.configureLoadout(['backup-body', 'hotspot']);
+    loop.configureSpecialist('stage-documentary');
     loop.startShift();
     loop.dispatch('capture');
     loop.reachProductionStation();
@@ -253,5 +257,70 @@ describe('AriadneLoop', () => {
     expect(loop.state.production?.total).toBeCloseTo(totalBefore + 1.5);
     expect(loop.state.pressures.client).toBeGreaterThan(clientPressureBefore + 31);
     expect(loop.state.completed).toBe(false);
+  });
+
+  it('turns team gossip into a separate specialist assignment', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+    loop.configureLoadout(['backup-body', 'hotspot']);
+    loop.configureSpecialist('news-desk');
+    loop.startShift();
+
+    const startEvents = loop.tick(4.3);
+    expect(startEvents).toContainEqual({
+      type: 'rumor-started',
+      rumor: expect.objectContaining({ id: 'ten-photo-myth', zone: 'media' }),
+    });
+    expect(loop.dispatchSupport('media')).toEqual({ type: 'specialist-assigned', zone: 'media' });
+    expect(loop.state.specialistAssignment?.total).toBe(1.8);
+    loop.reachSpecialistZone();
+    const events = loop.tick(1.9);
+
+    expect(events).toContainEqual({
+      type: 'rumor-resolved',
+      zone: 'media',
+      outcome: expect.objectContaining({ rumorId: 'ten-photo-myth', resolved: true }),
+    });
+    expect(loop.state.currentRumor?.phase).toBe('resolved');
+    expect(loop.state.lastRumorOutcome?.resolved).toBe(true);
+  });
+
+  it('lets a wrong gossip check consume time without becoming a fail state', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+    loop.configureLoadout(['backup-body', 'hotspot']);
+    loop.configureSpecialist('stage-documentary');
+    loop.startShift();
+    loop.tick(4.3);
+
+    expect(loop.dispatchSupport('backstage')).toEqual({ type: 'specialist-assigned', zone: 'backstage' });
+    loop.reachSpecialistZone();
+    const checked = loop.tick(1.9);
+    expect(checked).toContainEqual({ type: 'rumor-checked', zone: 'backstage' });
+    expect(loop.state.currentRumor?.phase).toBe('active');
+
+    const deadlineBefore = loop.state.deadline;
+    const escalated = loop.tick(8);
+    expect(escalated).toContainEqual({
+      type: 'rumor-escalated',
+      outcome: expect.objectContaining({ rumorId: 'ten-photo-myth', resolved: false }),
+    });
+    expect(loop.state.deadline).toBeLessThan(deadlineBefore - 11.9);
+    expect(loop.state.completed).toBe(false);
+  });
+
+  it('turns a delivered case into one causal zone upgrade for the next case', () => {
+    const loop = new AriadneLoop();
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+
+    expect(loop.applyZoneUpgrade('edit')).toBe(true);
+    expect(loop.applyZoneUpgrade('delivery')).toBe(false);
+    loop.startNextJob();
+
+    const nextBrief = JOB_BRIEFS[1]!;
+    expect(loop.state.zoneUpgrades.edit).toBe(1);
+    expect(loop.currentWorkDuration('edit')).toBeCloseTo(nextBrief.workDuration.edit - 1);
   });
 });

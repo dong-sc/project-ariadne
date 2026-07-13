@@ -3,6 +3,7 @@ import {
   AriadneLoop,
   EQUIPMENT,
   JOB_BRIEFS,
+  SPECIALISTS,
   STAGE_ORDER,
   type DispatchResult,
   type EquipmentId,
@@ -10,7 +11,12 @@ import {
   type JobOutcome,
   type LoopEvent,
   type ProductionStationId,
+  type RumorOutcome,
+  type SpecialistId,
   type StationId,
+  type SupportDispatchResult,
+  type SupportZoneId,
+  type UpgradeZoneId,
 } from './AriadneLoop';
 import { calculateWorldLayout } from './layout';
 
@@ -37,6 +43,24 @@ interface StationView {
   queueDots: Graphics[];
 }
 
+interface SupportZone {
+  id: SupportZoneId;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: number;
+}
+
+interface SupportView {
+  root: Container;
+  body: Graphics;
+  detail: Graphics;
+  label: Text;
+  status: Text;
+}
+
 const STATIONS: readonly Station[] = [
   { id: 'capture', label: '拍攝', x: 32, y: 344, width: 120, height: 112, color: 0x537fc9 },
   { id: 'edit', label: '修圖', x: 181, y: 302, width: 148, height: 142, color: 0x725ac0 },
@@ -44,11 +68,24 @@ const STATIONS: readonly Station[] = [
   { id: 'client', label: '客戶窗口', x: 172, y: 166, width: 176, height: 98, color: 0xa95563 },
 ];
 
+const SUPPORT_ZONES: readonly SupportZone[] = [
+  { id: 'backstage', label: '側台', x: 24, y: 182, width: 132, height: 70, color: 0x426b63 },
+  { id: 'media', label: '媒體席', x: 364, y: 182, width: 132, height: 70, color: 0x75536d },
+];
+
+const UPGRADE_COPY: Readonly<Record<UpgradeZoneId, { label: string; detail: string }>> = {
+  capture: { label: '拍攝區 · 雙機位覆蓋', detail: '縮短每案拍攝工時' },
+  edit: { label: '修圖區 · 熱資料夾', detail: '縮短進檔與修圖工時' },
+  delivery: { label: '交件區 · 預建資料夾', detail: '縮短封裝與上傳工時' },
+  client: { label: '客戶區 · 單一窗口', detail: '降低客戶壓力成長' },
+};
+
 export class AriadneGame {
   private readonly app = new Application();
   private readonly world = new Container();
   private readonly loop = new AriadneLoop();
   private readonly stationViews = new Map<StationId, StationView>();
+  private readonly supportViews = new Map<SupportZoneId, SupportView>();
   private readonly ambientLayer = new Graphics();
   private readonly briefBoard = new Graphics();
   private readonly briefTitle = new Text({
@@ -81,8 +118,14 @@ export class AriadneGame {
     text: '流程助理',
     style: new TextStyle({ fill: 0x9edcff, fontSize: 9, fontWeight: '800', stroke: { color: 0x111620, width: 3 } }),
   });
+  private readonly specialist = new Container();
+  private readonly specialistRole = new Text({
+    text: '搭檔',
+    style: new TextStyle({ fill: 0xd7a8e6, fontSize: 9, fontWeight: '800', stroke: { color: 0x111620, width: 3 } }),
+  });
   private elapsed = 0;
   private readonly selectedEquipment = new Set<EquipmentId>();
+  private selectedSpecialist: SpecialistId | null = null;
 
   public constructor(private readonly host: HTMLDivElement) {}
 
@@ -103,6 +146,7 @@ export class AriadneGame {
     this.world.addChild(this.ambientLayer);
     this.buildRoom();
     this.buildStations();
+    this.buildSupportZones();
     this.buildPeople();
     this.world.addChild(
       this.routeLayer,
@@ -115,6 +159,7 @@ export class AriadneGame {
     document.querySelector<HTMLButtonElement>('#next-job')?.addEventListener('click', () => this.startNextJob());
     this.loop.prepareShift();
     this.setupPreflight();
+    this.setupUpgrades();
     this.openPreflight();
     this.app.ticker.add((ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05)));
   }
@@ -210,6 +255,36 @@ export class AriadneGame {
     this.renderStations();
   }
 
+  private buildSupportZones(): void {
+    for (const zone of SUPPORT_ZONES) {
+      const root = new Container();
+      root.eventMode = 'static';
+      root.cursor = 'pointer';
+      root.hitArea = {
+        contains: (x: number, y: number) =>
+          x >= zone.x && x <= zone.x + zone.width && y >= zone.y && y <= zone.y + zone.height,
+      };
+      const body = new Graphics();
+      const detail = new Graphics();
+      const label = new Text({
+        text: zone.label,
+        style: new TextStyle({ fill: 0xffffff, fontSize: 12, fontWeight: '800' }),
+      });
+      const status = new Text({
+        text: '聽風聲',
+        style: new TextStyle({ fill: 0xb8c4d0, fontSize: 8, fontWeight: '700' }),
+      });
+      label.position.set(zone.x + 9, zone.y + 8);
+      status.anchor.set(1, 0);
+      status.position.set(zone.x + zone.width - 9, zone.y + 10);
+      root.addChild(body, detail, label, status);
+      root.on('pointerdown', () => this.onSupportClick(zone.id));
+      this.supportViews.set(zone.id, { root, body, detail, label, status });
+      this.world.addChild(root);
+    }
+    this.renderSupportZones();
+  }
+
   private buildPeople(): void {
     this.photographerBody.roundRect(-14, -26, 28, 36, 8).fill({ color: 0x202a3c });
     this.photographerHead.circle(0, -38, 11).fill({ color: 0xf0c4a4 });
@@ -230,7 +305,18 @@ export class AriadneGame {
     this.assistantRole.position.set(0, -59);
     this.assistant.addChild(assistantBody, assistantHead, assistantTablet, this.assistantRole);
     this.assistant.position.set(420, 520);
-    this.world.addChild(this.photographer, this.assistant);
+
+    const specialistBody = new Graphics();
+    specialistBody.roundRect(-13, -24, 26, 34, 8).fill({ color: 0x694a74 });
+    const specialistHead = new Graphics();
+    specialistHead.circle(0, -36, 10).fill({ color: 0xd9ad91 });
+    const specialistBag = new Graphics();
+    specialistBag.roundRect(8, -17, 15, 15, 4).fill({ color: 0x252a31 });
+    this.specialistRole.anchor.set(0.5);
+    this.specialistRole.position.set(0, -59);
+    this.specialist.addChild(specialistBody, specialistHead, specialistBag, this.specialistRole);
+    this.specialist.position.set(260, 558);
+    this.world.addChild(this.photographer, this.assistant, this.specialist);
   }
 
   private setupPreflight(): void {
@@ -252,18 +338,47 @@ export class AriadneGame {
       }));
     }
 
+    const specialistGrid = document.querySelector<HTMLDivElement>('#specialist-grid');
+    if (specialistGrid) {
+      specialistGrid.replaceChildren(...SPECIALISTS.map((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'specialist-option';
+        button.dataset.specialist = item.id;
+        button.setAttribute('aria-pressed', 'false');
+        const label = document.createElement('b');
+        label.textContent = `${item.label}｜${item.field}`;
+        const passive = document.createElement('small');
+        passive.textContent = item.passive;
+        button.append(label, passive);
+        button.addEventListener('click', () => {
+          this.selectedSpecialist = item.id;
+          this.renderPreflightSelection();
+        });
+        return button;
+      }));
+    }
+
     document.querySelector<HTMLButtonElement>('#start-shift')?.addEventListener('click', () => {
       const loadout = [...this.selectedEquipment];
-      if (!this.loop.configureLoadout(loadout) || !this.loop.startShift()) return;
+      if (
+        !this.selectedSpecialist
+        || !this.loop.configureLoadout(loadout)
+        || !this.loop.configureSpecialist(this.selectedSpecialist)
+        || !this.loop.startShift()
+      ) return;
       document.querySelector('#preflight')?.classList.remove('is-visible');
       document.querySelector('.game-shell')?.classList.remove('is-preflight');
-      this.setMessage('裝備收好了。簡報只是一部分，先看現場，再派工。');
+      this.specialistRole.text = this.loop.specialistDefinition()?.label.replace('攝影師', '') ?? '搭檔';
+      this.setMessage('裝備與搭檔都到位了。大場不只有工作站，側台與媒體席的話也會改變現場。');
       this.renderLoadout();
+      this.renderCrewState();
     });
   }
 
   private openPreflight(): void {
     this.selectedEquipment.clear();
+    this.selectedSpecialist = null;
     const signals = document.querySelector<HTMLUListElement>('#field-signals');
     if (signals) {
       signals.replaceChildren(...this.loop.preflightSignals().map((signal) => {
@@ -277,6 +392,7 @@ export class AriadneGame {
     this.setMessage('出發前聽到四段風聲，其中一段今晚不會發生。你能帶兩樣，不能把未知全部消掉。');
     this.renderPreflightSelection();
     this.renderLoadout();
+    this.renderCrewState();
   }
 
   private toggleEquipment(id: EquipmentId): void {
@@ -296,9 +412,17 @@ export class AriadneGame {
       button.classList.toggle('is-selected', selected);
       button.setAttribute('aria-pressed', String(selected));
     });
-    this.setText('preflight-count', `已選 ${this.selectedEquipment.size}/2 · 留下什麼，也是一個決定`);
+    document.querySelectorAll<HTMLButtonElement>('.specialist-option').forEach((button) => {
+      const selected = button.dataset.specialist === this.selectedSpecialist;
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    this.setText(
+      'preflight-count',
+      `裝備 ${this.selectedEquipment.size}/2 · 搭檔 ${this.selectedSpecialist ? '1/1' : '0/1'} · 留下什麼，也是一個決定`,
+    );
     const start = document.querySelector<HTMLButtonElement>('#start-shift');
-    if (start) start.disabled = this.selectedEquipment.size !== 2;
+    if (start) start.disabled = this.selectedEquipment.size !== 2 || !this.selectedSpecialist;
   }
 
   private renderLoadout(): void {
@@ -316,6 +440,96 @@ export class AriadneGame {
       element.textContent = equipment ? `${this.loop.equipmentLabel(equipment)}${used ? ' · 接住' : ''}` : index === 0 ? '尚未整備' : '—';
       element.classList.toggle('is-used', used);
     });
+  }
+
+  private setupUpgrades(): void {
+    const grid = document.querySelector<HTMLDivElement>('#upgrade-grid');
+    if (!grid) return;
+    grid.replaceChildren(...Object.entries(UPGRADE_COPY).map(([id, copy]) => {
+      const zone = id as UpgradeZoneId;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'upgrade-option';
+      button.dataset.upgrade = zone;
+      const label = document.createElement('b');
+      label.textContent = copy.label;
+      const detail = document.createElement('small');
+      detail.textContent = copy.detail;
+      button.append(label, detail);
+      button.addEventListener('click', () => this.chooseUpgrade(zone));
+      return button;
+    }));
+  }
+
+  private chooseUpgrade(zone: UpgradeZoneId): void {
+    if (!this.loop.applyZoneUpgrade(zone)) return;
+    const copy = UPGRADE_COPY[zone];
+    this.setText('upgrade-copy', `${copy.label}已留下。這不是分數，是下一案少做的一件事。`);
+    this.renderUpgradeChoices();
+    const next = document.querySelector<HTMLButtonElement>('#next-job');
+    if (next) next.disabled = false;
+    this.spawnFeedback(this.stationCenter(zone).x, this.stationCenter(zone).y, '流程升級');
+  }
+
+  private renderUpgradeChoices(): void {
+    document.querySelectorAll<HTMLButtonElement>('.upgrade-option').forEach((button) => {
+      const zone = button.dataset.upgrade as UpgradeZoneId;
+      const level = this.loop.state.zoneUpgrades[zone];
+      button.classList.toggle('is-selected', this.loop.state.upgradeChosenForJob && level > 0);
+      button.disabled = this.loop.state.upgradeChosenForJob || level >= 2;
+      const label = button.querySelector('b');
+      if (label) label.textContent = `${UPGRADE_COPY[zone].label} · L${level}`;
+    });
+  }
+
+  private renderCrewState(): void {
+    const definition = this.loop.specialistDefinition()
+      ?? SPECIALISTS.find((item) => item.id === this.selectedSpecialist)
+      ?? null;
+    this.setText('crew-specialist', definition?.label ?? '尚未選人');
+    const rumorElement = document.querySelector<HTMLElement>('#field-rumor');
+    const rumor = this.loop.state.currentRumor;
+    const rumorDefinition = this.loop.currentRumorDefinition();
+    if (!rumorElement) return;
+    rumorElement.classList.remove('is-active', 'is-resolved');
+    if (!this.loop.state.shiftStarted) {
+      rumorElement.textContent = '現場還沒有風聲';
+    } else if (rumor?.phase === 'active' && rumorDefinition) {
+      rumorElement.textContent = `風聲 ${Math.ceil(rumor.remaining)}s｜${rumorDefinition.line}`;
+      rumorElement.classList.add('is-active');
+    } else if (rumor?.phase === 'resolved') {
+      rumorElement.textContent = '風聲已查清，沒有繼續擴散';
+      rumorElement.classList.add('is-resolved');
+    } else if (rumor?.phase === 'escalated') {
+      rumorElement.textContent = '沒人查證的話，已經變成現場事實';
+      rumorElement.classList.add('is-active');
+    } else {
+      rumorElement.textContent = '大場正在運轉，留意新的風聲';
+    }
+  }
+
+  private onSupportClick(zone: SupportZoneId): void {
+    const result = this.loop.dispatchSupport(zone);
+    this.handleSupportDispatch(result);
+    const view = this.supportViews.get(zone);
+    view?.root.scale.set(0.985);
+    window.setTimeout(() => view?.root.scale.set(1), 100);
+  }
+
+  private handleSupportDispatch(result: SupportDispatchResult): void {
+    if (result.type === 'specialist-assigned') {
+      this.setMessage(`已派搭檔去${this.supportZoneLabel(result.zone)}查證。查的是來源，不是看哪句話比較大聲。`);
+      const center = this.supportZoneCenter(result.zone);
+      this.spawnFeedback(center.x, center.y, '去查清楚');
+    } else if (result.type === 'specialist-busy') {
+      this.setMessage(`搭檔正在${this.supportZoneLabel(result.zone)}查證，先讓這件事有結果。`);
+    } else if (result.type === 'no-active-rumor') {
+      this.setMessage('目前沒有需要查證的風聲。保留人力，繼續看拍攝、交接與客戶。');
+    } else if (result.type === 'shift-not-started') {
+      this.setMessage('先完成整備與搭檔選擇，再進入現場。');
+    } else {
+      this.setMessage('本案已交件，讓團隊先安靜下來。');
+    }
   }
 
   private handleIncident(outcome: IncidentOutcome): void {
@@ -344,8 +558,10 @@ export class AriadneGame {
     this.animateRoom(stress);
     this.renderBriefBoard();
     this.renderStations();
+    this.renderSupportZones();
     this.renderHud(stress);
     this.renderLoadout();
+    this.renderCrewState();
   }
 
   private onStationClick(id: StationId): void {
@@ -415,9 +631,30 @@ export class AriadneGame {
       this.spawnFeedback(this.stationCenter('client').x, this.stationCenter('client').y, '追問');
     } else if (event.type === 'incident-triggered') {
       this.handleIncident(event.outcome);
+    } else if (event.type === 'rumor-started') {
+      this.setMessage(`團隊頻道傳來一句話：${event.rumor.line}。來源可能在側台或媒體席，派搭檔去查證。`);
+      this.spawnFeedback(260, 278, '風聲出現');
+    } else if (event.type === 'rumor-checked') {
+      this.setMessage(`${this.supportZoneLabel(event.zone)}沒有找到這句話的來源。搭檔已回來，還能改查另一邊。`);
+      const center = this.supportZoneCenter(event.zone);
+      this.spawnFeedback(center.x, center.y, '不是這裡');
+    } else if (event.type === 'rumor-resolved') {
+      this.handleRumorOutcome(event.outcome, event.zone);
+    } else if (event.type === 'rumor-escalated') {
+      this.handleRumorOutcome(event.outcome);
     } else {
       this.setMessage(`${this.stationLabel(event.station)}出了差錯。流程退回，但案件仍救得回來。`);
       this.spawnFeedback(this.stationCenter(event.station).x, this.stationCenter(event.station).y, '需要重派');
+    }
+  }
+
+  private handleRumorOutcome(outcome: RumorOutcome, zone?: SupportZoneId): void {
+    this.setMessage(`${outcome.line} ${outcome.detail}`);
+    if (zone) {
+      const center = this.supportZoneCenter(zone);
+      this.spawnFeedback(center.x, center.y, '查清楚了');
+    } else {
+      this.spawnFeedback(260, 278, '話變成事實');
     }
   }
 
@@ -458,6 +695,22 @@ export class AriadneGame {
     }
 
     if (!client && !handoffPrep) this.assistant.y += Math.sin(this.elapsed * 2.2) * 0.04;
+
+    const specialistAssignment = this.loop.state.specialistAssignment;
+    const specialistTarget = specialistAssignment
+      ? this.supportZoneCenter(specialistAssignment.zone)
+      : { x: 260, y: 558 };
+    const specialistTargetY = specialistAssignment ? specialistTarget.y + 78 : specialistTarget.y;
+    this.specialist.x += (specialistTarget.x - this.specialist.x) * 0.1;
+    this.specialist.y += (specialistTargetY - this.specialist.y) * 0.1;
+    if (specialistAssignment?.phase === 'moving') {
+      const distance = Math.hypot(
+        specialistTarget.x - this.specialist.x,
+        specialistTargetY - this.specialist.y,
+      );
+      if (distance < 7) this.loop.reachSpecialistZone();
+    }
+    this.specialist.rotation = specialistAssignment?.phase === 'working' ? Math.sin(this.elapsed * 11) * 0.014 : 0;
   }
 
   private animateRoom(stress: number): void {
@@ -486,6 +739,12 @@ export class AriadneGame {
     if (client || handoffPrep) {
       const destination = this.stationCenter(handoffPrep?.station ?? 'client');
       this.drawRoute(this.routeLayer, this.assistant.x, this.assistant.y - 10, destination.x, destination.y + 94, 0x9edcff);
+    }
+
+    const specialistAssignment = this.loop.state.specialistAssignment;
+    if (specialistAssignment) {
+      const destination = this.supportZoneCenter(specialistAssignment.zone);
+      this.drawRoute(this.routeLayer, this.specialist.x, this.specialist.y - 10, destination.x, destination.y + 68, 0xd7a8e6);
     }
 
     this.actionRing.clear();
@@ -532,6 +791,15 @@ export class AriadneGame {
         this.attentionLayer.moveTo(signalX + Math.cos(-0.8) * 27, signalY + Math.sin(-0.8) * 27)
           .arc(signalX, signalY, 27, -0.8, 0.8)
           .stroke({ color: 0xffc0c8, alpha: pulse * 0.7, width: 2 });
+      }
+    }
+
+    const rumor = this.loop.state.currentRumor;
+    if (!isComplete && rumor?.phase === 'active') {
+      for (const zone of SUPPORT_ZONES) {
+        const pulse = 0.44 + Math.sin(this.elapsed * 5) * 0.16;
+        this.attentionLayer.roundRect(zone.x - 4, zone.y - 4, zone.width + 8, zone.height + 8, 14)
+          .stroke({ color: 0xd7a8e6, alpha: pulse, width: 2 });
       }
     }
 
@@ -620,6 +888,8 @@ export class AriadneGame {
       }
 
       view.label.alpha = this.loop.state.completed ? 0.64 : emphasized ? 1 : 0.58;
+      const upgradeLevel = this.loop.state.zoneUpgrades[station.id];
+      view.label.text = `${station.label}${upgradeLevel > 0 ? ` · L${upgradeLevel}` : ''}`;
       view.statusLabel.text = this.stationStatus(station.id);
       view.statusLabel.style.fill = isQueued || isPreparing ? 0xd7f3ff : risk === 'danger' ? 0xffc0c8 : risk === 'busy' ? 0xffd99a : 0xe6ebf3;
 
@@ -630,6 +900,50 @@ export class AriadneGame {
         dot.circle(station.x + 12 + index * 14, station.y + station.height - 17, 4)
           .fill({ color: statusColor, alpha: 0.55 + index * 0.06 });
       });
+    }
+  }
+
+  private renderSupportZones(): void {
+    const rumor = this.loop.state.currentRumor;
+    const assignment = this.loop.state.specialistAssignment;
+    for (const zone of SUPPORT_ZONES) {
+      const view = this.supportViews.get(zone.id);
+      if (!view) continue;
+      const isWorking = assignment?.zone === zone.id;
+      const isRumorActive = rumor?.phase === 'active';
+      const pulse = 0.64 + Math.sin(this.elapsed * 5) * 0.18;
+      view.body.clear();
+      view.body.roundRect(zone.x, zone.y, zone.width, zone.height, 12)
+        .fill({ color: zone.color, alpha: this.loop.state.completed ? 0.36 : isRumorActive ? 0.92 : 0.58 })
+        .stroke({
+          color: isWorking ? 0xffffff : isRumorActive ? 0xd7a8e6 : 0xffffff,
+          alpha: isWorking ? 0.92 : isRumorActive ? pulse : 0.12,
+          width: isWorking ? 3 : isRumorActive ? 2 : 1,
+        });
+      view.detail.clear();
+      if (zone.id === 'backstage') {
+        view.detail.rect(zone.x + 12, zone.y + 34, 56, 5).fill({ color: 0xd4ded9, alpha: 0.6 });
+        view.detail.rect(zone.x + 18, zone.y + 45, 78, 5).fill({ color: 0xd4ded9, alpha: 0.42 });
+        view.detail.circle(zone.x + 109, zone.y + 48, 9).fill({ color: 0x263e3a, alpha: 0.9 });
+      } else {
+        view.detail.roundRect(zone.x + 12, zone.y + 33, 48, 26, 4).fill({ color: 0x202431, alpha: 0.9 });
+        view.detail.rect(zone.x + 17, zone.y + 38, 38, 16).fill({ color: 0xa97bc0, alpha: 0.72 });
+        view.detail.rect(zone.x + 72, zone.y + 38, 42, 4).fill({ color: 0xe7d9e6, alpha: 0.52 });
+        view.detail.rect(zone.x + 72, zone.y + 49, 30, 4).fill({ color: 0xe7d9e6, alpha: 0.4 });
+      }
+      view.label.alpha = this.loop.state.completed ? 0.55 : 1;
+      view.status.text = !this.loop.state.shiftStarted
+        ? '整備後開放'
+        : isWorking
+          ? assignment?.phase === 'moving' ? '搭檔前往' : `查證 ${Math.ceil(assignment.remaining)}s`
+          : rumor?.phase === 'active'
+            ? '可派搭檔'
+            : rumor?.phase === 'resolved'
+              ? '已查清'
+              : rumor?.phase === 'escalated'
+                ? '已擴散'
+                : '聽風聲';
+      view.status.style.fill = isWorking ? 0xffffff : isRumorActive ? 0xf2c8ff : 0xb8c4d0;
     }
   }
 
@@ -780,7 +1094,21 @@ export class AriadneGame {
         : `沒帶${this.loop.equipmentLabel(incidentOutcome.equipmentId)}：${incidentOutcome.title}`
       : '今晚沒有留下足夠紀錄');
     this.setText('incident-detail', incidentOutcome?.detail ?? '有些風險只能在真正發生後被看見。');
+    const rumorOutcome = this.loop.state.lastRumorOutcome;
+    this.setText('rumor-title', rumorOutcome
+      ? rumorOutcome.resolved
+        ? `搭檔查清了：${rumorOutcome.line}`
+        : `沒人查證：${rumorOutcome.line}`
+      : '這一案沒有留下可追的耳語');
+    this.setText('rumor-detail', rumorOutcome?.detail ?? '不是每一句閒話都重要，但重要的那句需要有人去確認。');
     this.setText('next-job', shiftComplete ? '重新開始一輪工作日' : `接下一案｜${nextBrief.title}`);
+
+    const upgradePanel = document.querySelector('#upgrade-panel');
+    upgradePanel?.classList.toggle('is-hidden', shiftComplete);
+    this.setText('upgrade-copy', '交件後選一處改善，下一案就少一點臨場負擔。');
+    this.renderUpgradeChoices();
+    const nextButton = document.querySelector<HTMLButtonElement>('#next-job');
+    if (nextButton) nextButton.disabled = !shiftComplete;
 
     this.spawnFeedback(260, 310, shiftComplete ? '今日收工' : '完成交件');
     document.querySelector('.game-shell')?.classList.add('is-complete');
@@ -797,13 +1125,16 @@ export class AriadneGame {
     document.querySelector('#completion')?.classList.remove('is-visible');
     this.photographer.position.set(112, 528);
     this.assistant.position.set(420, 520);
+    this.specialist.position.set(260, 558);
     if (shiftComplete) {
       this.loop.prepareShift();
       this.openPreflight();
       return;
     }
+    const nextButton = document.querySelector<HTMLButtonElement>('#next-job');
+    if (nextButton) nextButton.disabled = false;
     const brief = this.loop.currentBrief();
-    this.setMessage(`${brief.title}進場。${brief.cue}。先讀現場，再點拍攝站派工。`);
+    this.setMessage(`${brief.title}進場。${brief.cue}。主線照常運轉，但側台與媒體席可能隨時傳出風聲。`);
   }
 
   private outcomeCopy(outcome: JobOutcome | null): { title: string; detail: string } {
@@ -881,6 +1212,17 @@ export class AriadneGame {
 
   private stationLabel(id: StationId): string {
     return this.stationById(id)?.label ?? id;
+  }
+
+  private supportZoneCenter(id: SupportZoneId): { x: number; y: number } {
+    const zone = SUPPORT_ZONES.find((item) => item.id === id);
+    return zone
+      ? { x: zone.x + zone.width / 2, y: zone.y + zone.height / 2 }
+      : { x: 260, y: 300 };
+  }
+
+  private supportZoneLabel(id: SupportZoneId): string {
+    return SUPPORT_ZONES.find((item) => item.id === id)?.label ?? id;
   }
 
   private nextProductionStation(): ProductionStationId | null {
