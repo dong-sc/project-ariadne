@@ -1,8 +1,10 @@
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
 import {
   AriadneLoop,
+  JOB_BRIEFS,
   STAGE_ORDER,
   type DispatchResult,
+  type JobOutcome,
   type LoopEvent,
   type ProductionStationId,
   type StationId,
@@ -45,6 +47,19 @@ export class AriadneGame {
   private readonly loop = new AriadneLoop();
   private readonly stationViews = new Map<StationId, StationView>();
   private readonly ambientLayer = new Graphics();
+  private readonly briefBoard = new Graphics();
+  private readonly briefTitle = new Text({
+    text: '',
+    style: new TextStyle({ fill: 0xf4d276, fontSize: 12, fontWeight: '800' }),
+  });
+  private readonly briefCue = new Text({
+    text: '',
+    style: new TextStyle({ fill: 0xcbd3e0, fontSize: 9, lineHeight: 13, wordWrap: true, wordWrapWidth: 168 }),
+  });
+  private readonly briefProgress = new Text({
+    text: '',
+    style: new TextStyle({ fill: 0x8f9aae, fontSize: 8, fontWeight: '700' }),
+  });
   private readonly routeLayer = new Graphics();
   private readonly attentionLayer = new Graphics();
   private readonly actionRing = new Graphics();
@@ -86,7 +101,8 @@ export class AriadneGame {
     );
 
     document.querySelector<HTMLButtonElement>('#next-job')?.addEventListener('click', () => this.startNextJob());
-    this.setMessage('先看黃色提示。點一下拍攝站，攝影師就會去工作。');
+    const brief = this.loop.currentBrief();
+    this.setMessage(`${brief.title}進場。${brief.cue}。先看各站，再派工。`);
     this.app.ticker.add((ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05)));
   }
 
@@ -108,6 +124,11 @@ export class AriadneGame {
     room.rect(387, 88, 64, 8).fill({ color: 0xeee5c6, alpha: 0.6 });
     room.rect(387, 106, 74, 8).fill({ color: 0xeee5c6, alpha: 0.6 });
     this.world.addChild(room);
+
+    this.briefTitle.position.set(171, 57);
+    this.briefCue.position.set(171, 77);
+    this.briefProgress.position.set(171, 111);
+    this.world.addChild(this.briefBoard, this.briefTitle, this.briefCue, this.briefProgress);
 
     const title = new Text({
       text: '萊鳥攝影事務所',
@@ -203,6 +224,7 @@ export class AriadneGame {
 
     const stress = this.loop.averagePressure();
     this.animateRoom(stress);
+    this.renderBriefBoard();
     this.renderStations();
     this.renderHud(stress);
   }
@@ -380,6 +402,23 @@ export class AriadneGame {
     }
   }
 
+  private renderBriefBoard(): void {
+    const brief = this.loop.currentBrief();
+    const accent = brief.id === 'portrait' ? 0xd29aa9 : brief.id === 'rush' ? 0xe4ac55 : 0x8fb6dd;
+    const caseNumber = this.loop.state.jobIndex + 1;
+    const bufferCopy = this.loop.state.workflowBuffer > 0 ? ' · 已留餘裕' : '';
+
+    this.briefBoard.clear();
+    this.briefBoard.roundRect(158, 45, 198, 86, 10)
+      .fill({ color: 0x171d28, alpha: 0.94 })
+      .stroke({ color: accent, alpha: 0.58, width: 2 });
+    this.briefBoard.circle(344, 57, 4).fill({ color: accent, alpha: 0.88 });
+    this.briefTitle.text = brief.title;
+    this.briefTitle.style.fill = accent;
+    this.briefCue.text = brief.cue;
+    this.briefProgress.text = `CASE ${caseNumber}/${JOB_BRIEFS.length} · ${brief.focus}${bufferCopy}`;
+  }
+
   private renderStations(): void {
     for (const station of STATIONS) {
       const view = this.stationViews.get(station.id);
@@ -533,15 +572,42 @@ export class AriadneGame {
         : `下一步｜派工${this.stationLabel(this.loop.state.active)}`;
 
     this.setText('next-action', nextAction);
+    const brief = this.loop.currentBrief();
+    this.setText('job-title', brief.title);
+    this.setText('job-focus', `${this.loop.state.jobIndex + 1}/${JOB_BRIEFS.length} · ${brief.focus}`);
     this.setText('deadline', this.loop.state.completed ? '完成' : `${Math.max(0, Math.ceil(this.loop.state.deadline))}s`);
-    this.setText('studio-state', this.loop.state.completed ? '安靜' : stress >= 75 ? '危險' : stress >= 45 ? '忙亂' : '穩定');
+    this.setText('studio-state', this.loop.state.completed
+      ? '安靜'
+      : stress >= 75
+        ? '危險'
+        : stress >= 45
+          ? '忙亂'
+          : this.loop.state.workflowBuffer > 0 ? '有餘裕' : '穩定');
     this.setText('worker-state', production ? (production.phase === 'moving' ? '移動中' : '執行中') : '待命');
   }
 
   private completeJob(): void {
-    this.setMessage('交件完成。電話停了，工作室安靜下來。這一刻不用急著做下一件事。');
-    this.spawnFeedback(260, 310, '完成交件');
+    const outcome = this.loop.state.lastOutcome;
+    const shiftComplete = this.loop.isShiftComplete();
+    const nextBrief = this.loop.nextBrief();
+    const currentCase = this.loop.state.jobIndex + 1;
+
+    this.setMessage(shiftComplete
+      ? '今天的三種案件都交完了。工作室真正安靜下來，沒有下一個紅點在催你。'
+      : `交件完成。下一案是${nextBrief.title}，但現在先讓工作室安靜一下。`);
+    this.setText('completion-kicker', shiftComplete ? 'SHIFT CLEAR' : `DELIVERED · ${currentCase}/${JOB_BRIEFS.length}`);
+    this.setText('completion-title', shiftComplete ? '今天可以收工了' : '本案已交件');
+    this.setText('completion-copy', shiftComplete
+      ? '三種風險節奏都已處理完畢。好的流程不是更忙，而是讓忙亂有結束。'
+      : `壓力歸零。下一案「${nextBrief.title}」會帶來不同的觀察順序。`);
+    const insight = this.outcomeCopy(outcome);
+    this.setText('outcome-title', insight.title);
+    this.setText('outcome-detail', insight.detail);
+    this.setText('next-job', shiftComplete ? '重新開始一輪工作日' : `接下一案｜${nextBrief.title}`);
+
+    this.spawnFeedback(260, 310, shiftComplete ? '今日收工' : '完成交件');
     document.querySelector('.game-shell')?.classList.add('is-complete');
+    document.querySelector('.game-shell')?.classList.toggle('is-shift-complete', shiftComplete);
     document.querySelector('#completion')?.classList.add('is-visible');
     if ('vibrate' in navigator) navigator.vibrate(45);
   }
@@ -549,10 +615,40 @@ export class AriadneGame {
   private startNextJob(): void {
     this.loop.startNextJob();
     document.querySelector('.game-shell')?.classList.remove('is-complete');
+    document.querySelector('.game-shell')?.classList.remove('is-shift-complete');
     document.querySelector('#completion')?.classList.remove('is-visible');
     this.photographer.position.set(112, 528);
     this.assistant.position.set(420, 520);
-    this.setMessage('新案件進來了。先觀察，再點一下拍攝站派工。');
+    const brief = this.loop.currentBrief();
+    this.setMessage(`${brief.title}進場。${brief.cue}。先讀現場，再點拍攝站派工。`);
+  }
+
+  private outcomeCopy(outcome: JobOutcome | null): { title: string; detail: string } {
+    if (!outcome) {
+      return { title: '流程已收束', detail: '完成交件後，工作室會留下下一案的餘裕。' };
+    }
+    if (outcome.cleanWorkflow) {
+      return {
+        title: '流程留下了餘裕',
+        detail: '兩次交接都有預排，也主動更新過窗口；下一案的起始壓力會更低。',
+      };
+    }
+    if (outcome.stageFailures > 0 || outcome.clientEscalations > 0) {
+      return {
+        title: '救回來了，但還有雜訊',
+        detail: '案件完成了；下一輪若更早看見交接與客戶風險，工作室會更安靜。',
+      };
+    }
+    if (outcome.clientUpdates === 0) {
+      return {
+        title: '交件完成，窗口仍在等',
+        detail: '生產線很順，但少了一次主動更新；完整流程也包含讓客戶知道正在發生什麼。',
+      };
+    }
+    return {
+      title: '本案已穩穩落地',
+      detail: '有照顧窗口，也完成交件；再多一次預排，下一案就能少一個臨場決定。',
+    };
   }
 
   private spawnFeedback(x: number, y: number, text: string): void {
@@ -570,7 +666,7 @@ export class AriadneGame {
     this.world.addChild(label);
 
     let lifetime = 0;
-    const duration = text === '完成交件' ? 2.2 : 1.15;
+    const duration = text === '完成交件' || text === '今日收工' ? 2.2 : 1.15;
     const animate = () => {
       lifetime += this.app.ticker.deltaMS / 1000;
       label.y -= this.app.ticker.deltaMS * 0.018;

@@ -20,6 +20,8 @@ body { overflow: hidden; }
 .metric b,.metric span { display: block; }
 .metric b { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .metric span { color: #aab3c4; font-size: 10px; }
+.metric-brief { flex: 1.2; border-color: rgba(244,210,118,.18); background: linear-gradient(145deg,rgba(42,40,31,.9),rgba(20,25,35,.82)); }
+.metric-brief span { color: #d5c795; }
 .game-canvas { position: absolute; inset: 0; }
 .game-canvas canvas { display: block; width: 100%; height: 100%; }
 .bottom-copy { position: absolute; z-index: 10; left: 14px; right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); min-height: 42px; padding: 11px 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 14px; color: #e0e5ee; background: rgba(8,11,16,.88); box-shadow: 0 10px 30px rgba(0,0,0,.24); backdrop-filter: blur(10px); pointer-events: none; font-size: 12px; line-height: 1.45; transition: opacity .35s ease, transform .35s ease; }
@@ -28,10 +30,17 @@ body { overflow: hidden; }
 .completion span { display: block; color: #f3cf6c; font-size: 9px; font-weight: 900; letter-spacing: .2em; }
 .completion strong { display: block; margin-top: 7px; font-size: 25px; letter-spacing: -.03em; }
 .completion p { margin: 8px auto 16px; max-width: 280px; color: #bdc6d4; font-size: 12px; line-height: 1.55; }
+.completion-insight { margin: 0 0 14px; padding: 10px 12px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: rgba(7,10,15,.42); text-align: left; }
+.completion-insight b,.completion-insight small { display: block; }
+.completion-insight b { color: #eef2f8; font-size: 12px; }
+.completion-insight small { margin-top: 4px; color: #9faabc; font-size: 10px; line-height: 1.45; }
 .completion button { width: 100%; min-height: 44px; border: 1px solid rgba(244,210,118,.48); border-radius: 13px; color: #17191d; background: #f3cf6c; font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; touch-action: manipulation; }
 .completion button:active { transform: translateY(1px); }
 .completion.is-visible { opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1); }
 .game-shell.is-complete .bottom-copy { opacity: .4; transform: translateY(8px); }
+.game-shell.is-shift-complete .completion { border-color: rgba(158,220,255,.38); background: linear-gradient(155deg,rgba(31,46,52,.96),rgba(15,20,27,.96)); box-shadow: 0 24px 90px rgba(0,0,0,.48), 0 0 70px rgba(158,220,255,.13); }
+.game-shell.is-shift-complete .completion span { color: #9edcff; }
+.game-shell.is-shift-complete .completion button { border-color: rgba(158,220,255,.5); background: #bce8ff; }
 
 @media (max-width: 390px) {
   .game-hud { padding-right: 10px; padding-left: 10px; }

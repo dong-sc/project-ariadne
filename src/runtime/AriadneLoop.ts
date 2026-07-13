@@ -1,6 +1,27 @@
 export type StationId = 'capture' | 'edit' | 'delivery' | 'client';
 export type ProductionStationId = Exclude<StationId, 'client'>;
 export type AssignmentPhase = 'moving' | 'working';
+export type JobBriefId = 'event' | 'portrait' | 'rush';
+
+export interface JobBrief {
+  id: JobBriefId;
+  title: string;
+  focus: string;
+  cue: string;
+  initialPressures: Record<StationId, number>;
+  deadline: number;
+  workDuration: Record<ProductionStationId, number>;
+  clientGrowth: number;
+}
+
+export interface JobOutcome {
+  smoothHandoffs: number;
+  clientUpdates: number;
+  clientEscalations: number;
+  stageFailures: number;
+  cleanWorkflow: boolean;
+  workflowBuffer: number;
+}
 
 export interface ProductionAssignment {
   station: ProductionStationId;
@@ -18,6 +39,7 @@ export interface ClientAssignment {
 export interface LoopState {
   pressures: Record<StationId, number>;
   deadline: number;
+  jobIndex: number;
   active: ProductionStationId;
   production: ProductionAssignment | null;
   queuedProduction: ProductionStationId | null;
@@ -25,6 +47,12 @@ export interface LoopState {
   clientCooldown: number;
   completed: boolean;
   deliveredJobs: number;
+  workflowBuffer: number;
+  smoothHandoffs: number;
+  clientUpdates: number;
+  clientEscalations: number;
+  stageFailures: number;
+  lastOutcome: JobOutcome | null;
 }
 
 export type DispatchResult =
@@ -48,23 +76,64 @@ export type LoopEvent =
 
 export const STAGE_ORDER: readonly ProductionStationId[] = ['capture', 'edit', 'delivery'];
 
-export const WORK_DURATION: Record<ProductionStationId, number> = {
-  capture: 5.8,
-  edit: 7.2,
-  delivery: 5.4,
-};
+export const JOB_BRIEFS: readonly JobBrief[] = [
+  {
+    id: 'event',
+    title: '活動快訊',
+    focus: '三站平衡',
+    cue: '流程平均，客戶會逐步追問',
+    initialPressures: { capture: 18, edit: 5, delivery: 0, client: 16 },
+    deadline: 78,
+    workDuration: { capture: 5.8, edit: 7.2, delivery: 5.4 },
+    clientGrowth: 1.82,
+  },
+  {
+    id: 'portrait',
+    title: '品牌肖像',
+    focus: '溝通優先',
+    cue: '窗口較敏感，修圖需要更多時間',
+    initialPressures: { capture: 12, edit: 12, delivery: 0, client: 42 },
+    deadline: 84,
+    workDuration: { capture: 6.4, edit: 8.8, delivery: 5.4 },
+    clientGrowth: 2.2,
+  },
+  {
+    id: 'rush',
+    title: '晚宴急件',
+    focus: '交件優先',
+    cue: '時間較緊，交付端已經開始升溫',
+    initialPressures: { capture: 14, edit: 8, delivery: 32, client: 12 },
+    deadline: 64,
+    workDuration: { capture: 5.4, edit: 7.8, delivery: 6.2 },
+    clientGrowth: 1.55,
+  },
+];
+
+export const WORK_DURATION = JOB_BRIEFS[0]!.workDuration;
 
 const CLIENT_WORK_DURATION = 2.8;
 const CLIENT_COOLDOWN = 8;
 
-function initialPressures(): Record<StationId, number> {
-  return { capture: 18, edit: 5, delivery: 0, client: 16 };
+function jobBrief(index: number): JobBrief {
+  return JOB_BRIEFS[index] ?? JOB_BRIEFS[0]!;
+}
+
+function initialPressures(jobIndex: number, workflowBuffer: number): Record<StationId, number> {
+  const relief = workflowBuffer * 4;
+  const profile = jobBrief(jobIndex).initialPressures;
+  return {
+    capture: Math.max(0, profile.capture - relief),
+    edit: Math.max(0, profile.edit - relief),
+    delivery: Math.max(0, profile.delivery - relief),
+    client: Math.max(0, profile.client - relief),
+  };
 }
 
 export class AriadneLoop {
   public readonly state: LoopState = {
-    pressures: initialPressures(),
-    deadline: 78,
+    pressures: initialPressures(0, 0),
+    deadline: JOB_BRIEFS[0]!.deadline,
+    jobIndex: 0,
     active: 'capture',
     production: null,
     queuedProduction: null,
@@ -72,7 +141,31 @@ export class AriadneLoop {
     clientCooldown: 0,
     completed: false,
     deliveredJobs: 0,
+    workflowBuffer: 0,
+    smoothHandoffs: 0,
+    clientUpdates: 0,
+    clientEscalations: 0,
+    stageFailures: 0,
+    lastOutcome: null,
   };
+
+  public currentBrief(): JobBrief {
+    return jobBrief(this.state.jobIndex);
+  }
+
+  public nextBrief(): JobBrief {
+    return jobBrief((this.state.jobIndex + 1) % JOB_BRIEFS.length);
+  }
+
+  public currentWorkDuration(station: ProductionStationId): number {
+    return this.currentBrief().workDuration[station];
+  }
+
+  public isShiftComplete(): boolean {
+    return this.state.completed
+      && this.state.deliveredJobs > 0
+      && this.state.deliveredJobs % JOB_BRIEFS.length === 0;
+  }
 
   public dispatch(id: StationId): DispatchResult {
     if (this.state.completed) return { type: 'job-complete' };
@@ -112,8 +205,8 @@ export class AriadneLoop {
     this.state.production = {
       station: id,
       phase: 'moving',
-      remaining: WORK_DURATION[id],
-      total: WORK_DURATION[id],
+      remaining: this.currentWorkDuration(id),
+      total: this.currentWorkDuration(id),
     };
     return { type: 'production-assigned', station: id };
   }
@@ -140,7 +233,7 @@ export class AriadneLoop {
       this.state.pressures[station] = this.clamp(this.state.pressures[station] + dt * (growth + workingRelief));
     }
 
-    const clientGrowth = this.state.client?.phase === 'working' ? 0.35 : 1.82;
+    const clientGrowth = this.state.client?.phase === 'working' ? 0.35 : this.currentBrief().clientGrowth;
     this.state.pressures.client = this.clamp(this.state.pressures.client + dt * clientGrowth);
 
     if (this.state.production?.phase === 'working') {
@@ -154,6 +247,7 @@ export class AriadneLoop {
         this.state.client = null;
         this.state.clientCooldown = CLIENT_COOLDOWN;
         this.state.pressures.client = Math.max(0, this.state.pressures.client - 52);
+        this.state.clientUpdates += 1;
         events.push({ type: 'client-complete' });
       }
     }
@@ -164,6 +258,7 @@ export class AriadneLoop {
     if (this.state.pressures.client >= 100) {
       this.state.pressures.client = 62;
       this.state.deadline -= 8;
+      this.state.clientEscalations += 1;
       events.push({ type: 'client-escalated' });
     }
 
@@ -174,6 +269,7 @@ export class AriadneLoop {
       this.state.pressures[failed] = 42;
       this.state.deadline = Math.max(18, this.state.deadline + 20);
       this.state.pressures.client = this.clamp(this.state.pressures.client + 14);
+      this.state.stageFailures += 1;
       events.push({ type: 'stage-failed', station: failed });
     }
 
@@ -181,14 +277,19 @@ export class AriadneLoop {
   }
 
   public startNextJob(): void {
-    this.state.pressures = initialPressures();
-    this.state.deadline = 78;
+    this.state.jobIndex = (this.state.jobIndex + 1) % JOB_BRIEFS.length;
+    this.state.pressures = initialPressures(this.state.jobIndex, this.state.workflowBuffer);
+    this.state.deadline = this.currentBrief().deadline + this.state.workflowBuffer * 4;
     this.state.active = 'capture';
     this.state.production = null;
     this.state.queuedProduction = null;
     this.state.client = null;
     this.state.clientCooldown = 0;
     this.state.completed = false;
+    this.state.smoothHandoffs = 0;
+    this.state.clientUpdates = 0;
+    this.state.clientEscalations = 0;
+    this.state.stageFailures = 0;
   }
 
   public averagePressure(): number {
@@ -209,6 +310,21 @@ export class AriadneLoop {
       this.state.queuedProduction = null;
       this.state.completed = true;
       this.state.deliveredJobs += 1;
+      const cleanWorkflow = this.state.smoothHandoffs === 2
+        && this.state.clientUpdates > 0
+        && this.state.clientEscalations === 0
+        && this.state.stageFailures === 0;
+      this.state.workflowBuffer = cleanWorkflow
+        ? Math.min(2, this.state.workflowBuffer + 1)
+        : Math.max(0, this.state.workflowBuffer - 1);
+      this.state.lastOutcome = {
+        smoothHandoffs: this.state.smoothHandoffs,
+        clientUpdates: this.state.clientUpdates,
+        clientEscalations: this.state.clientEscalations,
+        stageFailures: this.state.stageFailures,
+        cleanWorkflow,
+        workflowBuffer: this.state.workflowBuffer,
+      };
       this.state.client = null;
       this.state.clientCooldown = 0;
       this.state.pressures = { capture: 0, edit: 0, delivery: 0, client: 0 };
@@ -218,9 +334,15 @@ export class AriadneLoop {
     this.state.active = next;
     this.state.deadline += 10;
     const autoStarted = this.state.queuedProduction === next;
+    if (autoStarted) this.state.smoothHandoffs += 1;
     this.state.queuedProduction = null;
     this.state.production = autoStarted
-      ? { station: next, phase: 'moving', remaining: WORK_DURATION[next], total: WORK_DURATION[next] }
+      ? {
+          station: next,
+          phase: 'moving',
+          remaining: this.currentWorkDuration(next),
+          total: this.currentWorkDuration(next),
+        }
       : null;
     return [{ type: 'production-complete', station: completed, next, autoStarted }];
   }

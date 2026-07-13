@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AriadneLoop, WORK_DURATION } from './AriadneLoop';
+import { AriadneLoop, JOB_BRIEFS, STAGE_ORDER, WORK_DURATION } from './AriadneLoop';
 
 function finishActiveStage(loop: AriadneLoop): void {
   const station = loop.state.active;
@@ -87,5 +87,44 @@ describe('AriadneLoop', () => {
     loop.startNextJob();
     expect(loop.state.completed).toBe(false);
     expect(loop.state.active).toBe('capture');
+    expect(loop.currentBrief().id).toBe('portrait');
+    expect(loop.state.lastOutcome?.cleanWorkflow).toBe(false);
+  });
+
+  it('turns a clean workflow into visible breathing room on the next brief', () => {
+    const loop = new AriadneLoop();
+
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    expect(loop.dispatch('edit')).toEqual({ type: 'production-queued', station: 'edit' });
+    expect(loop.dispatch('client')).toEqual({ type: 'client-assigned' });
+    loop.reachClientStation();
+    loop.tick(3);
+    loop.tick(3);
+
+    expect(loop.state.active).toBe('edit');
+    loop.reachProductionStation();
+    expect(loop.dispatch('delivery')).toEqual({ type: 'production-queued', station: 'delivery' });
+    loop.tick(loop.currentWorkDuration('edit') + 0.1);
+    expect(loop.state.active).toBe('delivery');
+    loop.reachProductionStation();
+    loop.tick(loop.currentWorkDuration('delivery') + 0.1);
+
+    expect(loop.state.completed).toBe(true);
+    expect(loop.state.lastOutcome).toMatchObject({
+      smoothHandoffs: STAGE_ORDER.length - 1,
+      clientUpdates: 1,
+      clientEscalations: 0,
+      stageFailures: 0,
+      cleanWorkflow: true,
+      workflowBuffer: 1,
+    });
+
+    loop.startNextJob();
+    const portrait = JOB_BRIEFS[1]!;
+    expect(loop.currentBrief().id).toBe('portrait');
+    expect(loop.state.pressures.client).toBe(portrait.initialPressures.client - 4);
+    expect(loop.state.deadline).toBe(portrait.deadline + 4);
+    expect(loop.currentWorkDuration('edit')).toBe(portrait.workDuration.edit);
   });
 });
