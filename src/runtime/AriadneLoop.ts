@@ -103,7 +103,7 @@ export const JOB_BRIEFS: readonly JobBrief[] = [
     cue: '窗口較敏感，延後回覆會快速升溫',
     initialPressures: { capture: 12, edit: 12, delivery: 0, client: 42 },
     deadline: 84,
-    workDuration: { capture: 6.4, edit: 8.8, delivery: 5.4 },
+    workDuration: { capture: 8.4, edit: 8.8, delivery: 5.4 },
     clientGrowth: 2.2,
   },
   {

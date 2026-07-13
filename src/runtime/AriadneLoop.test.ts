@@ -105,6 +105,34 @@ describe('AriadneLoop', () => {
     expect(loop.dispatch('edit')).toEqual({ type: 'assistant-busy', task: 'client' });
   });
 
+  it('gives the communication-first brief time to reply before preparing the handoff', () => {
+    const loop = new AriadneLoop();
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    finishActiveStage(loop);
+    loop.startNextJob();
+
+    expect(loop.currentBrief().id).toBe('portrait');
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    expect(loop.dispatch('client')).toEqual({ type: 'client-assigned' });
+    loop.reachClientStation();
+    loop.tick(3);
+    expect(loop.dispatch('edit')).toEqual({ type: 'handoff-prep-assigned', station: 'edit' });
+    loop.reachHandoffStation();
+    loop.tick(HANDOFF_PREP_DURATION + 0.1);
+
+    expect(loop.state.production?.station).toBe('capture');
+    expect(loop.state.queuedProduction).toBe('edit');
+    const events = loop.tick(loop.state.production?.remaining ?? 0);
+    expect(events).toContainEqual({
+      type: 'production-complete',
+      station: 'capture',
+      next: 'edit',
+      autoStarted: true,
+    });
+  });
+
   it('stops pressure and time after delivery until the player starts another job', () => {
     const loop = new AriadneLoop();
     finishActiveStage(loop);
