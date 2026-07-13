@@ -10,11 +10,53 @@ export type SpecialistId = 'stage-documentary' | 'news-desk' | 'people-first';
 export type UpgradeZoneId = StationId;
 export type RumorId = 'group-photo-drift' | 'ten-photo-myth' | 'vip-no-photo' | 'raw-files-now';
 export type CareerChoiceId = 'craft' | 'network' | 'leverage';
+export type DilemmaChoiceId = 'absorb' | 'boundary' | 'delegate';
+export type CareerDilemmaId =
+  | 'raw-demand'
+  | 'favor-insert'
+  | 'credit-erasure'
+  | 'young-rival'
+  | 'body-warning'
+  | 'silent-assistant';
 
 export interface CareerTracks {
   craft: number;
   network: number;
   leverage: number;
+}
+
+export interface CareerVitals {
+  stamina: number;
+  trust: number;
+  standing: number;
+}
+
+export interface WorkdayModifier {
+  productionSeconds: number;
+  handoffSeconds: number;
+  specialistSeconds: number;
+  clientOpening: number;
+  clientGrowth: number;
+  deadlineSeconds: number;
+  rumorWindowSeconds: number;
+}
+
+export interface DilemmaOptionDefinition {
+  id: DilemmaChoiceId;
+  label: string;
+  preview: string;
+  aftermath: string;
+  vitals: Partial<CareerVitals>;
+  modifier: Partial<WorkdayModifier>;
+}
+
+export interface CareerDilemmaDefinition {
+  id: CareerDilemmaId;
+  minShift: number;
+  title: string;
+  body: string;
+  weightFor?: CareerChoiceId;
+  options: readonly DilemmaOptionDefinition[];
 }
 
 export interface CareerChoiceDefinition {
@@ -118,6 +160,14 @@ export interface CampaignProgress {
   shiftNumber: number;
   zoneUpgrades: Record<UpgradeZoneId, number>;
   careerTracks?: CareerTracks;
+  careerVitals?: CareerVitals;
+  recentDilemmas?: CareerDilemmaId[];
+  preparedDilemma?: {
+    shiftNumber: number;
+    dilemmaId: CareerDilemmaId;
+    choiceId: DilemmaChoiceId;
+  } | null;
+  nextShiftReady?: boolean;
 }
 
 export interface ProductionAssignment {
@@ -172,6 +222,11 @@ export interface LoopState {
   shiftNumber: number;
   careerTracks: CareerTracks;
   careerChoiceForShift: CareerChoiceId | null;
+  careerVitals: CareerVitals;
+  careerDilemmaId: CareerDilemmaId | null;
+  dilemmaChoiceForShift: DilemmaChoiceId | null;
+  recentDilemmas: CareerDilemmaId[];
+  workdayModifier: WorkdayModifier;
 }
 
 export type DispatchResult =
@@ -380,7 +435,7 @@ const EVENT_VARIANTS: readonly (readonly Pick<JobBrief, 'title' | 'focus' | 'cue
     { title: '千人晚宴', focus: '晚間即時發稿', cue: '所有人都說來得及，舞台、合照與發稿條件卻沒有人一起實測' },
   ],
   [
-    { title: '全國技能競賽', focus: '雙館＋選手覆蓋', cue: '每一區都說拍完了，總表上卻還有人沒有任何紀錄' },
+    { title: '超大型展場活動', focus: '雙館＋多區覆蓋', cue: '每一區都說拍完了，總表上卻還有攤位沒有任何紀錄' },
     { title: '大型記者會', focus: '長官＋即時發稿', cue: '致詞順序臨時對調，媒體群組仍在轉傳上一版流程' },
     { title: '企業家庭日', focus: '舞台＋全員合照', cue: '大家都說可以最後補拍，但接駁車會準時把人送走' },
   ],
@@ -400,6 +455,16 @@ const LOADOUT_SIZE = 2;
 const RUMOR_RESPONSE_WINDOW = 13;
 const SUPPORT_WORK_DURATION = 3;
 
+const NEUTRAL_WORKDAY_MODIFIER: WorkdayModifier = {
+  productionSeconds: 0,
+  handoffSeconds: 0,
+  specialistSeconds: 0,
+  clientOpening: 0,
+  clientGrowth: 0,
+  deadlineSeconds: 0,
+  rumorWindowSeconds: 0,
+};
+
 export const CAREER_CHOICES: readonly CareerChoiceDefinition[] = [
   {
     id: 'craft',
@@ -418,6 +483,204 @@ export const CAREER_CHOICES: readonly CareerChoiceDefinition[] = [
     label: '情勒流',
     gain: '窗口更快被安撫',
     debt: '團隊信任受損，交接準備變慢',
+  },
+];
+
+export const CAREER_DILEMMAS: readonly CareerDilemmaDefinition[] = [
+  {
+    id: 'raw-demand',
+    minShift: 1,
+    title: '群組先問：順利的話，可以連原檔一起給嗎？',
+    body: '工作還沒開始，沒有用途、沒有張數，也沒有人願意把這句話寫進正式需求。',
+    options: [
+      {
+        id: 'absorb',
+        label: '先說可以，現場再想辦法',
+        preview: '主線會衝得更快，但模糊承諾會讓窗口更容易追加。',
+        aftermath: '你用體力填掉了沒寫進需求的工作；對方只記得你答應過。',
+        vitals: { stamina: -1 },
+        modifier: { productionSeconds: -0.3, clientGrowth: 0.2 },
+      },
+      {
+        id: 'boundary',
+        label: '先問用途，只承諾三張預覽',
+        preview: '窗口一開始會不高興，但後面的需求不再無限長大。',
+        aftermath: '你讓不舒服提早發生，換回一條可以交付的邊界。',
+        vitals: { standing: 1 },
+        modifier: { clientOpening: 9, clientGrowth: -0.2, deadlineSeconds: 3 },
+      },
+      {
+        id: 'delegate',
+        label: '拆一條快線，交給搭檔顧',
+        preview: '交接多一層協調，但即時交付與現場查證都會更有餘裕。',
+        aftermath: '你沒有把所有事抓在自己手上；團隊開始知道怎麼替你接住。',
+        vitals: { trust: 1 },
+        modifier: { handoffSeconds: 0.3, specialistSeconds: -0.55, deadlineSeconds: 2 },
+      },
+    ],
+  },
+  {
+    id: 'favor-insert',
+    minShift: 2,
+    title: '熟人的熟人說：幫我插五張，不會耽誤你',
+    body: '他沒有在正式群組，也不會替你向真正的窗口解釋為什麼交付順序變了。',
+    weightFor: 'network',
+    options: [
+      {
+        id: 'absorb',
+        label: '先插單，這個人情以後再算',
+        preview: '風聲會更早傳到你耳邊，但本來的截止時間不會等你。',
+        aftermath: '人情真的留下了，只是記帳的人不是你。',
+        vitals: { standing: -1 },
+        modifier: { deadlineSeconds: -4, rumorWindowSeconds: 1.6 },
+      },
+      {
+        id: 'boundary',
+        label: '請他回正式窗口排順序',
+        preview: '開場壓力會變高，但誰改了順序會留下紀錄。',
+        aftermath: '群組安靜了幾秒；至少明天沒有人能說是你自己改的。',
+        vitals: { standing: 1 },
+        modifier: { clientOpening: 10, clientGrowth: -0.14 },
+      },
+      {
+        id: 'delegate',
+        label: '請搭檔先對用途，不先答應張數',
+        preview: '交接需要多說一句，但錯誤需求更容易在進場前被拆掉。',
+        aftermath: '搭檔擋下了那句「順便」；他也開始知道自己有權問為什麼。',
+        vitals: { trust: 1 },
+        modifier: { handoffSeconds: 0.25, specialistSeconds: -0.45, rumorWindowSeconds: 0.8 },
+      },
+    ],
+  },
+  {
+    id: 'credit-erasure',
+    minShift: 3,
+    title: '結案簡報寫著「主辦團隊即時完成影像」',
+    body: '你的名字不在裡面，但下一場出問題時，他們仍然會第一個打給你。',
+    options: [
+      {
+        id: 'absorb',
+        label: '不提了，能繼續合作比較重要',
+        preview: '今天會比較好做，但市場更難知道真正是誰穩住現場。',
+        aftermath: '合作留下來了，功勞沒有；下一次責任還是會找到你。',
+        vitals: { standing: -1 },
+        modifier: { deadlineSeconds: 4, clientOpening: -4 },
+      },
+      {
+        id: 'boundary',
+        label: '在群組補上影像責任與交付紀錄',
+        preview: '窗口會感到被點名，但後續規格與責任比較不會消失。',
+        aftermath: '沒有人道歉，但下一版文件終於出現了你的角色。',
+        vitals: { standing: 1 },
+        modifier: { clientOpening: 8, rumorWindowSeconds: 1.1 },
+      },
+      {
+        id: 'delegate',
+        label: '要求把整個影像團隊一起列入',
+        preview: '你少拿一點個人光環，團隊會更願意主動補位。',
+        aftermath: '名字不只剩你一個；下次也不再只有你一個人記得所有事。',
+        vitals: { trust: 1 },
+        modifier: { handoffSeconds: -0.2, clientGrowth: 0.08 },
+      },
+    ],
+  },
+  {
+    id: 'young-rival',
+    minShift: 4,
+    title: '年輕攝影師報價只有六成，跑完整天還在幫大家收線',
+    body: '客戶把他的報價截圖傳給你。他體力更好、情緒更穩，也暫時沒有舊傷。',
+    options: [
+      {
+        id: 'absorb',
+        label: '跟價，差額用自己的體力補',
+        preview: '主線會被你硬拉快，但低價與追加需求會一起留下。',
+        aftermath: '你守住了這一場，卻教會市場用更低的價格期待同一套結果。',
+        vitals: { stamina: -1, standing: -1 },
+        modifier: { productionSeconds: -0.25, clientGrowth: 0.24 },
+      },
+      {
+        id: 'boundary',
+        label: '守住報價，拿掉沒付費的內容',
+        preview: '開場比較難談，但承諾會縮回你真正能交付的範圍。',
+        aftermath: '客戶沒有立刻喜歡你；但他開始知道不同價格買到的不是同一件事。',
+        vitals: { standing: 1 },
+        modifier: { clientOpening: 11, clientGrowth: -0.22, deadlineSeconds: 4 },
+      },
+      {
+        id: 'delegate',
+        label: '把他拉進團隊，不把他當敵人',
+        preview: '今天要多付協調成本，但你的判斷可以換成別人的體力。',
+        aftermath: '你沒有贏過他的體力；你把那份體力接進了自己的流程。',
+        vitals: { trust: 1, stamina: 1 },
+        modifier: { productionSeconds: 0.2, handoffSeconds: 0.35, specialistSeconds: -0.75 },
+      },
+    ],
+  },
+  {
+    id: 'body-warning',
+    minShift: 5,
+    title: '右手拇指開始發麻，醫師說不是休息一晚就會好',
+    body: '今天仍然有人等你出圖。身體沒有跳出確認視窗，也不會替你按暫停。',
+    weightFor: 'craft',
+    options: [
+      {
+        id: 'absorb',
+        label: '吞止痛，照原本速度做完',
+        preview: '今天的速度看起來沒變，明天可用的身體會再少一點。',
+        aftermath: '照片準時到了；麻木也留下來了。',
+        vitals: { stamina: -1 },
+        modifier: { productionSeconds: -0.35, deadlineSeconds: 2 },
+      },
+      {
+        id: 'boundary',
+        label: '縮小承諾，只守住必要交付',
+        preview: '窗口會先追問，但需求一旦被排序，後面比較不會失控。',
+        aftermath: '你第一次把「做不到全部」說在出事以前。',
+        vitals: { standing: 1 },
+        modifier: { clientOpening: 9, clientGrowth: -0.18, deadlineSeconds: 4 },
+      },
+      {
+        id: 'delegate',
+        label: '讓搭檔接一段，把手留給不能重來的畫面',
+        preview: '交接會多花時間，但主攝不再是整條流程唯一的關節。',
+        aftermath: '你少做了一段，團隊第一次多會了一段。',
+        vitals: { stamina: 1, trust: 1 },
+        modifier: { productionSeconds: 0.25, handoffSeconds: 0.25, specialistSeconds: -0.6 },
+      },
+    ],
+  },
+  {
+    id: 'silent-assistant',
+    minShift: 4,
+    title: '助理在群組只回「收到」，不再主動提醒任何事',
+    body: '以前他會補上你漏掉的下一步。現在每件事都等你說得一字不差。',
+    weightFor: 'leverage',
+    options: [
+      {
+        id: 'absorb',
+        label: '算了，自己記住所有下一步',
+        preview: '主線暫時不必磨合，但你的注意力會再少一塊。',
+        aftermath: '今天沒有人吵架；也沒有人再替你多想一步。',
+        vitals: { stamina: -1, trust: -1 },
+        modifier: { productionSeconds: -0.15, clientGrowth: 0.14, rumorWindowSeconds: -0.8 },
+      },
+      {
+        id: 'boundary',
+        label: '把責任與決定權重新說清楚',
+        preview: '今天的交接會慢一點，但沉默不再被當成服從。',
+        aftermath: '談話很難看；下一次助理終於又問了一句「那下一站呢？」',
+        vitals: { trust: 1 },
+        modifier: { handoffSeconds: 0.45, rumorWindowSeconds: 0.7 },
+      },
+      {
+        id: 'delegate',
+        label: '讓他自己負責一條交付線',
+        preview: '你會失去一部分即時控制，團隊則可能重新長出判斷。',
+        aftermath: '他做法和你不完全一樣，但那條線沒有再等你批准每一步。',
+        vitals: { trust: 1, standing: -1 },
+        modifier: { productionSeconds: -0.15, handoffSeconds: 0.2, specialistSeconds: -0.4 },
+      },
+    ],
   },
 ];
 
@@ -485,11 +748,20 @@ function createRumorPlan(rng: () => number): RumorId[] {
   return shuffledIds(Object.keys(RUMORS) as RumorId[], rng).slice(0, JOB_BRIEFS.length);
 }
 
+function clampVital(value: number): number {
+  return Math.max(0, Math.min(6, Math.floor(value)));
+}
+
+function workdayModifier(value: Partial<WorkdayModifier> = {}): WorkdayModifier {
+  return { ...NEUTRAL_WORKDAY_MODIFIER, ...value };
+}
+
 export class AriadneLoop {
   private incidentPlan: IncidentId[] = [];
   private signalOrder: IncidentId[] = [];
   private rumorPlan: RumorId[] = [];
   private rumorTriggerPlan: number[] = [];
+  private eventVariantPlan: Pick<JobBrief, 'title' | 'focus' | 'cue'>[] = [];
 
   public readonly state: LoopState = {
     pressures: initialPressures(0, 0),
@@ -526,14 +798,19 @@ export class AriadneLoop {
     shiftNumber: 1,
     careerTracks: { craft: 0, network: 0, leverage: 0 },
     careerChoiceForShift: null,
+    careerVitals: { stamina: 3, trust: 3, standing: 3 },
+    careerDilemmaId: null,
+    dilemmaChoiceForShift: null,
+    recentDilemmas: [],
+    workdayModifier: { ...NEUTRAL_WORKDAY_MODIFIER },
   };
 
   public constructor(private readonly rng: () => number = Math.random) {}
 
   private briefFor(index: number, shiftNumber: number): JobBrief {
     const base = jobBrief(index);
-    const cycle = EVENT_VARIANTS[(Math.max(1, shiftNumber) - 1) % EVENT_VARIANTS.length] ?? EVENT_VARIANTS[0]!;
-    const variant = cycle[index] ?? cycle[0]!;
+    const fixedCycle = EVENT_VARIANTS[(Math.max(1, shiftNumber) - 1) % EVENT_VARIANTS.length] ?? EVENT_VARIANTS[0]!;
+    const variant = this.eventVariantPlan[index] ?? fixedCycle[index] ?? fixedCycle[0]!;
     return { ...base, ...variant };
   }
 
@@ -548,7 +825,15 @@ export class AriadneLoop {
   public currentWorkDuration(station: ProductionStationId): number {
     const reductions: Record<ProductionStationId, number> = { capture: 0.7, edit: 1, delivery: 0.8 };
     const craftRelief = this.state.careerTracks.craft * 0.28;
-    return Math.max(3.5, this.currentBrief().workDuration[station] - this.state.zoneUpgrades[station] * reductions[station] - craftRelief);
+    const fatigueCost = Math.max(0, 3 - this.state.careerVitals.stamina) * 0.24;
+    return Math.max(
+      3.5,
+      this.currentBrief().workDuration[station]
+        - this.state.zoneUpgrades[station] * reductions[station]
+        - craftRelief
+        + fatigueCost
+        + this.state.workdayModifier.productionSeconds,
+    );
   }
 
   public clientWorkDuration(): number {
@@ -556,7 +841,38 @@ export class AriadneLoop {
   }
 
   public handoffWorkDuration(): number {
-    return HANDOFF_PREP_DURATION + this.state.careerTracks.leverage * 0.22;
+    const trustDelta = this.state.careerVitals.trust >= 3
+      ? -(this.state.careerVitals.trust - 3) * 0.12
+      : (3 - this.state.careerVitals.trust) * 0.18;
+    return Math.max(
+      2.2,
+      HANDOFF_PREP_DURATION
+        + this.state.careerTracks.leverage * 0.22
+        + trustDelta
+        + this.state.workdayModifier.handoffSeconds,
+    );
+  }
+
+  public careerStageLabel(): string {
+    if (this.state.shiftNumber >= 8) return '資深現場統籌';
+    if (this.state.shiftNumber >= 4) return '現場主力';
+    return '還在證明自己';
+  }
+
+  public careerConditionCopy(): string {
+    const { stamina, trust, standing } = this.state.careerVitals;
+    const staminaCopy = stamina >= 4 ? '仍有餘裕' : stamina >= 2 ? '開始透支' : '身體在追債';
+    const trustCopy = trust >= 4 ? '主動補位' : trust >= 2 ? '照指令做' : '團隊沉默';
+    const standingCopy = standing >= 4 ? '能守範圍' : standing >= 2 ? '反覆議價' : '報價被錨定';
+    return `體力 ${staminaCopy} · 團隊 ${trustCopy} · 議價 ${standingCopy}`;
+  }
+
+  public currentCareerDilemma(): CareerDilemmaDefinition | null {
+    return CAREER_DILEMMAS.find((item) => item.id === this.state.careerDilemmaId) ?? null;
+  }
+
+  public selectedDilemmaOption(): DilemmaOptionDefinition | null {
+    return this.currentCareerDilemma()?.options.find((item) => item.id === this.state.dilemmaChoiceForShift) ?? null;
   }
 
   public isShiftComplete(): boolean {
@@ -569,11 +885,16 @@ export class AriadneLoop {
     this.state.shiftNumber = 1;
     this.state.zoneUpgrades = { capture: 0, edit: 0, delivery: 0, client: 0 };
     this.state.careerTracks = { craft: 0, network: 0, leverage: 0 };
+    this.state.careerVitals = { stamina: 3, trust: 3, standing: 3 };
+    this.state.recentDilemmas = [];
     this.setupShift();
   }
 
   public prepareNextShift(): void {
     this.state.shiftNumber += 1;
+    if (this.state.shiftNumber >= 5 && this.state.shiftNumber % 2 === 1) {
+      this.state.careerVitals.stamina = clampVital(this.state.careerVitals.stamina - 1);
+    }
     this.setupShift();
   }
 
@@ -581,7 +902,9 @@ export class AriadneLoop {
     if (!Number.isFinite(progress.shiftNumber) || progress.shiftNumber < 1) return false;
     const zones = Object.keys(this.state.zoneUpgrades) as UpgradeZoneId[];
     if (!zones.every((zone) => Number.isFinite(progress.zoneUpgrades?.[zone]))) return false;
-    this.state.shiftNumber = Math.max(1, Math.floor(progress.shiftNumber));
+    const savedShift = Math.max(1, Math.floor(progress.shiftNumber));
+    const advanceCompletedShift = progress.nextShiftReady === true;
+    this.state.shiftNumber = savedShift + (advanceCompletedShift ? 1 : 0);
     for (const zone of zones) {
       this.state.zoneUpgrades[zone] = Math.max(0, Math.min(2, Math.floor(progress.zoneUpgrades[zone])));
     }
@@ -592,9 +915,26 @@ export class AriadneLoop {
         ? Math.max(0, Math.min(4, Math.floor(level)))
         : 0;
     }
-    this.state.pressures = initialPressures(this.state.jobIndex, this.state.workflowBuffer);
-    this.applyCareerOpeningPressure();
-    this.state.deadline = this.careerAdjustedDeadline();
+    const restoredVitals = progress.careerVitals ?? { stamina: 3, trust: 3, standing: 3 };
+    for (const vital of ['stamina', 'trust', 'standing'] as const) {
+      const value = restoredVitals[vital];
+      this.state.careerVitals[vital] = Number.isFinite(value) ? clampVital(value) : 3;
+    }
+    if (advanceCompletedShift && this.state.shiftNumber >= 5 && this.state.shiftNumber % 2 === 1) {
+      this.state.careerVitals.stamina = clampVital(this.state.careerVitals.stamina - 1);
+    }
+    this.state.recentDilemmas = (progress.recentDilemmas ?? [])
+      .filter((id): id is CareerDilemmaId => CAREER_DILEMMAS.some((item) => item.id === id))
+      .slice(-3);
+    const prepared = advanceCompletedShift ? null : progress.preparedDilemma;
+    const preferredDilemma = prepared?.shiftNumber === this.state.shiftNumber
+      && CAREER_DILEMMAS.some((item) => item.id === prepared.dilemmaId)
+      ? prepared.dilemmaId
+      : undefined;
+    this.setupShift(preferredDilemma);
+    if (prepared?.shiftNumber === this.state.shiftNumber && prepared.dilemmaId === this.state.careerDilemmaId) {
+      this.restoreDilemmaChoice(prepared.choiceId);
+    }
     return true;
   }
 
@@ -603,6 +943,17 @@ export class AriadneLoop {
       shiftNumber: this.state.shiftNumber,
       zoneUpgrades: { ...this.state.zoneUpgrades },
       careerTracks: { ...this.state.careerTracks },
+      careerVitals: { ...this.state.careerVitals },
+      recentDilemmas: [...this.state.recentDilemmas],
+      preparedDilemma: this.state.careerDilemmaId && this.state.dilemmaChoiceForShift
+        && !(this.isShiftComplete() && this.state.careerChoiceForShift)
+        ? {
+            shiftNumber: this.state.shiftNumber,
+            dilemmaId: this.state.careerDilemmaId,
+            choiceId: this.state.dilemmaChoiceForShift,
+          }
+        : null,
+      nextShiftReady: this.isShiftComplete() && Boolean(this.state.careerChoiceForShift),
     };
   }
 
@@ -614,11 +965,29 @@ export class AriadneLoop {
     return true;
   }
 
-  private setupShift(): void {
+  public chooseDilemma(choiceId: DilemmaChoiceId): boolean {
+    if (this.state.shiftStarted || this.state.dilemmaChoiceForShift) return false;
+    const dilemma = this.currentCareerDilemma();
+    const option = dilemma?.options.find((item) => item.id === choiceId);
+    if (!dilemma || !option) return false;
+    this.state.dilemmaChoiceForShift = choiceId;
+    this.state.workdayModifier = workdayModifier(option.modifier);
+    for (const vital of ['stamina', 'trust', 'standing'] as const) {
+      this.state.careerVitals[vital] = clampVital(
+        this.state.careerVitals[vital] + (option.vitals[vital] ?? 0),
+      );
+    }
+    this.state.recentDilemmas = [...this.state.recentDilemmas.filter((id) => id !== dilemma.id), dilemma.id].slice(-3);
+    this.resetOpeningState();
+    return true;
+  }
+
+  private setupShift(preferredDilemma?: CareerDilemmaId): void {
     this.incidentPlan = createIncidentPlan(this.rng);
     this.signalOrder = createSignalOrder(this.rng);
     this.rumorPlan = createRumorPlan(this.rng);
     this.rumorTriggerPlan = JOB_BRIEFS.map(() => 4.2 + Math.max(0, this.rng()) * 2.6);
+    this.eventVariantPlan = this.createEventVariantPlan();
     this.state.shiftStarted = false;
     this.state.loadout = [];
     this.state.currentIncident = null;
@@ -633,6 +1002,9 @@ export class AriadneLoop {
     this.state.jobElapsed = 0;
     this.state.upgradeChosenForJob = false;
     this.state.careerChoiceForShift = null;
+    this.state.careerDilemmaId = preferredDilemma ?? this.selectCareerDilemma();
+    this.state.dilemmaChoiceForShift = null;
+    this.state.workdayModifier = { ...NEUTRAL_WORKDAY_MODIFIER };
     this.state.jobIndex = 0;
     this.state.active = 'capture';
     this.state.production = null;
@@ -648,6 +1020,41 @@ export class AriadneLoop {
     this.state.clientEscalations = 0;
     this.state.stageFailures = 0;
     this.state.lastOutcome = null;
+    this.resetOpeningState();
+  }
+
+  private createEventVariantPlan(): Pick<JobBrief, 'title' | 'focus' | 'cue'>[] {
+    if (this.state.shiftNumber <= EVENT_VARIANTS.length) {
+      return [...(EVENT_VARIANTS[this.state.shiftNumber - 1] ?? EVENT_VARIANTS[0]!)];
+    }
+    return JOB_BRIEFS.map((_, index) => {
+      const column = EVENT_VARIANTS.map((cycle) => cycle[index]!).filter(Boolean);
+      const selected = Math.min(column.length - 1, Math.floor(Math.max(0, this.rng()) * column.length));
+      return column[selected] ?? column[0]!;
+    });
+  }
+
+  private selectCareerDilemma(): CareerDilemmaId {
+    const eligible = CAREER_DILEMMAS.filter((item) => item.minShift <= this.state.shiftNumber);
+    const fresh = eligible.filter((item) => !this.state.recentDilemmas.includes(item.id));
+    const pool = fresh.length > 0 ? fresh : eligible;
+    const weighted = pool.flatMap((item) => {
+      const weight = item.weightFor ? 1 + this.state.careerTracks[item.weightFor] : 1;
+      return Array.from({ length: weight }, () => item);
+    });
+    const index = Math.min(weighted.length - 1, Math.floor(Math.max(0, this.rng()) * weighted.length));
+    return (weighted[index] ?? CAREER_DILEMMAS[0]!).id;
+  }
+
+  private restoreDilemmaChoice(choiceId: DilemmaChoiceId): void {
+    const option = this.currentCareerDilemma()?.options.find((item) => item.id === choiceId);
+    if (!option) return;
+    this.state.dilemmaChoiceForShift = choiceId;
+    this.state.workdayModifier = workdayModifier(option.modifier);
+    this.resetOpeningState();
+  }
+
+  private resetOpeningState(): void {
     this.state.pressures = initialPressures(0, 0);
     this.applyCareerOpeningPressure();
     this.state.deadline = this.careerAdjustedDeadline();
@@ -675,6 +1082,7 @@ export class AriadneLoop {
     if (
       this.state.loadout.length !== LOADOUT_SIZE
       || !this.state.specialist
+      || !this.state.dilemmaChoiceForShift
       || this.incidentPlan.length !== JOB_BRIEFS.length
       || this.rumorPlan.length !== JOB_BRIEFS.length
     ) return false;
@@ -719,7 +1127,12 @@ export class AriadneLoop {
 
     const specialist = this.specialistDefinition();
     const favored = specialist?.favoredZone === zone;
-    const duration = favored ? 1.8 : SUPPORT_WORK_DURATION;
+    const baseDuration = favored ? 1.8 : SUPPORT_WORK_DURATION;
+    const trustRelief = Math.max(0, this.state.careerVitals.trust - 3) * 0.1;
+    const duration = Math.max(
+      1.2,
+      baseDuration + this.state.workdayModifier.specialistSeconds - trustRelief,
+    );
     this.state.specialistAssignment = {
       zone,
       phase: 'moving',
@@ -821,7 +1234,12 @@ export class AriadneLoop {
     const networkExpectation = this.state.careerTracks.network * 0.06;
     const clientGrowth = this.state.client?.phase === 'working'
       ? 0.35
-      : this.currentBrief().clientGrowth * clientUpgradeMultiplier + networkExpectation;
+      : Math.max(
+          0.35,
+          this.currentBrief().clientGrowth * clientUpgradeMultiplier
+            + networkExpectation
+            + this.state.workdayModifier.clientGrowth,
+        );
     this.state.pressures.client = this.clamp(this.state.pressures.client + dt * clientGrowth);
 
     if (this.state.handoffPrep?.phase === 'working') {
@@ -950,7 +1368,11 @@ export class AriadneLoop {
   private rumorStateForJob(jobIndex: number): RumorState | null {
     const id = this.rumorPlan[jobIndex];
     const networkWindow = this.state.careerTracks.network * 0.7;
-    return id ? { id, phase: 'dormant', remaining: RUMOR_RESPONSE_WINDOW + networkWindow, checkedZones: [] } : null;
+    const responseWindow = Math.max(
+      7,
+      RUMOR_RESPONSE_WINDOW + networkWindow + this.state.workdayModifier.rumorWindowSeconds,
+    );
+    return id ? { id, phase: 'dormant', remaining: responseWindow, checkedZones: [] } : null;
   }
 
   private updateRumor(dt: number): LoopEvent[] {
@@ -1089,11 +1511,23 @@ export class AriadneLoop {
   }
 
   private careerAdjustedDeadline(): number {
-    return Math.max(30, this.currentBrief().deadline - this.state.careerTracks.craft * 0.8);
+    return Math.max(
+      30,
+      this.currentBrief().deadline
+        - this.state.careerTracks.craft * 0.8
+        + this.state.workdayModifier.deadlineSeconds,
+    );
   }
 
   private applyCareerOpeningPressure(): void {
     const accessRelief = this.state.careerTracks.network * 2;
-    this.state.pressures.client = Math.max(0, this.state.pressures.client - accessRelief);
+    const standing = this.state.careerVitals.standing;
+    const standingPressure = standing >= 3 ? -(standing - 3) * 2 : (3 - standing) * 4;
+    this.state.pressures.client = this.clamp(
+      this.state.pressures.client
+        - accessRelief
+        + standingPressure
+        + this.state.workdayModifier.clientOpening,
+    );
   }
 }

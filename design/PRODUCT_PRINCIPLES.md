@@ -17,6 +17,11 @@
 15. Specialists create different ways to read a scene, not a rarity ladder.
 16. Time-sensitive information earns its own visual space; urgency must never depend on reading tiny text.
 17. Progress preserves methods and SOPs, not an ever-growing pile of power.
+18. The future may remain uncertain; the cause of a consequence may not.
+19. Every convenient promise must reveal who eventually pays for it.
+20. Career pressure changes the order of decisions, not only a hidden score.
+21. Age moves the player's advantage from stamina toward judgment, trust, process, and delegation.
+22. Replayability comes from recombining authored consequences, not from incoherent random punishment.
 
 ## Ariadne Principle
 

@@ -8,6 +8,7 @@ import {
   STAGE_ORDER,
   type CampaignProgress,
   type CareerChoiceId,
+  type DilemmaChoiceId,
   type DispatchResult,
   type EquipmentId,
   type IncidentOutcome,
@@ -168,6 +169,7 @@ export class AriadneGame {
     this.setupPreflight();
     this.setupUpgrades();
     this.setupCareerChoices();
+    this.renderDilemma();
     this.renderUpgradeChoices();
     this.renderCareerState();
     this.openPreflight();
@@ -377,6 +379,7 @@ export class AriadneGame {
         || !this.loop.configureSpecialist(this.selectedSpecialist)
         || !this.loop.startShift()
       ) return;
+      this.saveCampaign();
       document.querySelector('#preflight')?.classList.remove('is-visible');
       document.querySelector('.game-shell')?.classList.remove('is-preflight');
       this.specialistRole.text = this.loop.specialistDefinition()?.label.replace('攝影師', '') ?? '搭檔';
@@ -410,6 +413,7 @@ export class AriadneGame {
         : `工作室保留了 ${learnedSops} 處 SOP。今天換一組活動與風聲，但你不再從零開始。`,
     );
     this.renderPreflightSelection();
+    this.renderDilemma();
     this.renderLoadout();
     this.renderCrewState();
     this.renderCareerState();
@@ -439,10 +443,57 @@ export class AriadneGame {
     });
     this.setText(
       'preflight-count',
-      `裝備 ${this.selectedEquipment.size}/2 · 搭檔 ${this.selectedSpecialist ? '1/1' : '0/1'} · 留下什麼，也是一個決定`,
+      `現實 ${this.loop.state.dilemmaChoiceForShift ? '已回應' : '未回應'} · 裝備 ${this.selectedEquipment.size}/2 · 搭檔 ${this.selectedSpecialist ? '1/1' : '0/1'}`,
     );
     const start = document.querySelector<HTMLButtonElement>('#start-shift');
-    if (start) start.disabled = this.selectedEquipment.size !== 2 || !this.selectedSpecialist;
+    if (start) {
+      start.disabled = !this.loop.state.dilemmaChoiceForShift
+        || this.selectedEquipment.size !== 2
+        || !this.selectedSpecialist;
+    }
+  }
+
+  private renderDilemma(): void {
+    const dilemma = this.loop.currentCareerDilemma();
+    const grid = document.querySelector<HTMLDivElement>('#dilemma-grid');
+    if (!dilemma || !grid) return;
+    this.setText('dilemma-title', dilemma.title);
+    this.setText('dilemma-body', dilemma.body);
+    grid.replaceChildren(...dilemma.options.map((option) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'dilemma-option';
+      button.dataset.dilemmaChoice = option.id;
+      const label = document.createElement('b');
+      label.textContent = option.label;
+      const preview = document.createElement('small');
+      preview.textContent = option.preview;
+      button.append(label, preview);
+      button.addEventListener('click', () => this.chooseDilemma(option.id));
+      return button;
+    }));
+    this.renderDilemmaSelection();
+  }
+
+  private chooseDilemma(choice: DilemmaChoiceId): void {
+    if (!this.loop.chooseDilemma(choice)) return;
+    this.renderDilemmaSelection();
+    this.renderCareerState();
+    this.renderPreflightSelection();
+  }
+
+  private renderDilemmaSelection(): void {
+    const selected = this.loop.state.dilemmaChoiceForShift;
+    const outcome = this.loop.selectedDilemmaOption();
+    document.querySelectorAll<HTMLButtonElement>('.dilemma-option').forEach((button) => {
+      const isSelected = button.dataset.dilemmaChoice === selected;
+      button.classList.toggle('is-selected', isSelected);
+      button.disabled = Boolean(selected);
+    });
+    this.setText(
+      'dilemma-result',
+      outcome ? `今天先這樣做｜${outcome.aftermath}` : '每個做法都能救今天，也都會留下別的東西。',
+    );
   }
 
   private renderLoadout(): void {
@@ -538,7 +589,9 @@ export class AriadneGame {
   private renderCareerState(): void {
     const tracks = this.loop.state.careerTracks;
     const total = tracks.craft + tracks.network + tracks.leverage;
-    this.setText('career-ledger', total === 0
+    this.setText('career-stage', `${this.loop.careerStageLabel()} · 工作日 ${this.loop.state.shiftNumber}`);
+    this.setText('career-vitals', this.loop.careerConditionCopy());
+    this.setText('career-tracks', total === 0
       ? '生涯尚未定型｜每個工作日都會留下方向與代價'
       : `生涯足跡｜技術 ${tracks.craft} · 人脈 ${tracks.network} · 情勒 ${tracks.leverage}`);
     document.querySelectorAll<HTMLButtonElement>('.career-option').forEach((button) => {
@@ -1202,7 +1255,13 @@ export class AriadneGame {
     const careerPanel = document.querySelector('#career-panel');
     careerPanel?.classList.toggle('is-hidden', !shiftComplete);
     this.setText('upgrade-copy', '交件後選一處改善，下一案就少一點臨場負擔。');
-    this.setText('career-copy', '選一條路帶進明天。每個好處，都會帶著一筆代價。');
+    const dilemmaOutcome = this.loop.selectedDilemmaOption();
+    this.setText(
+      'career-copy',
+      shiftComplete && dilemmaOutcome
+        ? `今日代價｜${dilemmaOutcome.aftermath} 接著選一條路帶進明天。`
+        : '選一條路帶進明天。每個好處，都會帶著一筆代價。',
+    );
     this.renderUpgradeChoices();
     this.renderCareerState();
     const nextButton = document.querySelector<HTMLButtonElement>('#next-job');

@@ -39,6 +39,13 @@ async function bootstrap(): Promise<void> {
         <span>PRE-FLIGHT · 情報不完整</span>
         <h2 id="preflight-title">今晚只帶兩樣</h2>
         <p>這些風聲不一定都會發生，也沒有人能替你保證順序。</p>
+        <section class="career-pressure" id="career-pressure" aria-labelledby="dilemma-title">
+          <span>WORK BEFORE WORK · 還沒出發，規則先被改了</span>
+          <b id="dilemma-title">窗口先丟來一句沒有寫進合約的話</b>
+          <p id="dilemma-body">你要先決定這件事由誰承擔，才能開始整備。</p>
+          <div class="dilemma-grid" id="dilemma-grid"></div>
+          <small id="dilemma-result">每個做法都能救今天，也都會留下別的東西。</small>
+        </section>
         <ul id="field-signals" class="field-signals"></ul>
         <div class="equipment-grid" id="equipment-grid"></div>
         <small id="preflight-count">已選 0/2 · 留下什麼，也是一個決定</small>
@@ -46,8 +53,12 @@ async function bootstrap(): Promise<void> {
           <span>今晚和誰搭檔</span>
           <div class="specialist-grid" id="specialist-grid"></div>
         </div>
-        <div class="career-ledger" id="career-ledger">生涯尚未定型｜每個工作日都會留下方向與代價</div>
-        <button id="start-shift" type="button" disabled>收好兩樣，出發</button>
+        <div class="career-ledger" id="career-ledger">
+          <b id="career-stage">還在證明自己</b>
+          <span id="career-vitals">體力仍有餘裕 · 團隊照指令做 · 議價反覆拉扯</span>
+          <small id="career-tracks">生涯尚未定型｜每個工作日都會留下方向與代價</small>
+        </div>
+        <button id="start-shift" type="button" disabled>決定怎麼接，再出發</button>
       </section>
       <div class="completion" id="completion" role="status" aria-live="polite">
         <span id="completion-kicker">DELIVERED · 1/3</span>

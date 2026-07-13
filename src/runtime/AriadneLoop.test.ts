@@ -216,6 +216,8 @@ describe('AriadneLoop', () => {
     expect(loop.configureLoadout(['paper-runbook', 'hotspot'])).toBe(true);
     expect(loop.startShift()).toBe(false);
     expect(loop.configureSpecialist('stage-documentary')).toBe(true);
+    expect(loop.startShift()).toBe(false);
+    expect(loop.chooseDilemma('boundary')).toBe(true);
     expect(loop.startShift()).toBe(true);
     expect(loop.state.currentIncident).toBe('schedule-drift');
   });
@@ -223,6 +225,7 @@ describe('AriadneLoop', () => {
   it('lets the right equipment absorb an incident without hiding its cause', () => {
     const loop = new AriadneLoop(() => 0);
     loop.prepareShift();
+    loop.chooseDilemma('boundary');
     loop.configureLoadout(['paper-runbook', 'hotspot']);
     loop.configureSpecialist('stage-documentary');
     loop.startShift();
@@ -247,6 +250,7 @@ describe('AriadneLoop', () => {
   it('makes an uncovered incident create recoverable time and pressure costs', () => {
     const loop = new AriadneLoop(() => 0);
     loop.prepareShift();
+    loop.chooseDilemma('boundary');
     loop.configureLoadout(['backup-body', 'hotspot']);
     loop.configureSpecialist('stage-documentary');
     loop.startShift();
@@ -271,6 +275,7 @@ describe('AriadneLoop', () => {
   it('turns team gossip into a separate specialist assignment', () => {
     const loop = new AriadneLoop(() => 0);
     loop.prepareShift();
+    loop.chooseDilemma('boundary');
     loop.configureLoadout(['backup-body', 'hotspot']);
     loop.configureSpecialist('news-desk');
     loop.startShift();
@@ -297,6 +302,7 @@ describe('AriadneLoop', () => {
   it('lets a wrong gossip check consume time without becoming a fail state', () => {
     const loop = new AriadneLoop(() => 0);
     loop.prepareShift();
+    loop.chooseDilemma('boundary');
     loop.configureLoadout(['backup-body', 'hotspot']);
     loop.configureSpecialist('stage-documentary');
     loop.startShift();
@@ -345,7 +351,7 @@ describe('AriadneLoop', () => {
 
     expect(loop.state.shiftNumber).toBe(2);
     expect(loop.state.zoneUpgrades.client).toBe(1);
-    expect(loop.currentBrief().title).toBe('全國技能競賽');
+    expect(loop.currentBrief().title).toBe('超大型展場活動');
     expect(loop.state.shiftStarted).toBe(false);
     expect(loop.state.deliveredJobs).toBe(0);
   });
@@ -366,6 +372,10 @@ describe('AriadneLoop', () => {
       shiftNumber: 3,
       zoneUpgrades: { capture: 2, edit: 1, delivery: 0, client: 2 },
       careerTracks: { craft: 0, network: 0, leverage: 0 },
+      careerVitals: { stamina: 3, trust: 3, standing: 3 },
+      recentDilemmas: [],
+      preparedDilemma: null,
+      nextShiftReady: false,
     });
   });
 
@@ -398,5 +408,88 @@ describe('AriadneLoop', () => {
     expect(loop.clientWorkDuration()).toBeCloseTo(2.44);
     expect(loop.handoffWorkDuration()).toBeCloseTo(HANDOFF_PREP_DURATION + 0.44);
     expect(loop.state.deadline).toBeCloseTo(loop.currentBrief().deadline - 1.6);
+  });
+
+  it('makes the preflight reality choice alter both today and the persistent career', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+
+    expect(loop.currentCareerDilemma()?.id).toBe('raw-demand');
+    expect(loop.chooseDilemma('boundary')).toBe(true);
+    expect(loop.chooseDilemma('delegate')).toBe(false);
+    expect(loop.state.careerVitals.standing).toBe(4);
+    expect(loop.state.pressures.client).toBe(23);
+    expect(loop.state.deadline).toBe(JOB_BRIEFS[0]!.deadline + 3);
+    expect(loop.selectedDilemmaOption()?.aftermath).toContain('邊界');
+  });
+
+  it('restores a prepared career dilemma without charging its cost twice', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+
+    expect(loop.restoreCampaign({
+      shiftNumber: 4,
+      zoneUpgrades: { capture: 1, edit: 1, delivery: 0, client: 0 },
+      careerTracks: { craft: 1, network: 1, leverage: 1 },
+      careerVitals: { stamina: 3, trust: 3, standing: 4 },
+      recentDilemmas: ['young-rival'],
+      preparedDilemma: { shiftNumber: 4, dilemmaId: 'young-rival', choiceId: 'boundary' },
+    })).toBe(true);
+
+    expect(loop.currentCareerDilemma()?.id).toBe('young-rival');
+    expect(loop.state.dilemmaChoiceForShift).toBe('boundary');
+    expect(loop.state.careerVitals).toEqual({ stamina: 3, trust: 3, standing: 4 });
+    expect(loop.state.deadline).toBeCloseTo(loop.currentBrief().deadline - 0.8 + 4);
+    expect(loop.state.pressures.client).toBe(23);
+  });
+
+  it('restores shift clear at the next workday instead of granting the same career gain twice', () => {
+    const completed = new AriadneLoop(() => 0);
+    finishWorkday(completed);
+    expect(completed.applyCareerChoice('craft')).toBe(true);
+    const saved = completed.campaignProgress();
+    expect(saved.nextShiftReady).toBe(true);
+
+    const restored = new AriadneLoop(() => 0);
+    restored.prepareShift();
+    expect(restored.restoreCampaign(saved)).toBe(true);
+
+    expect(restored.state.shiftNumber).toBe(2);
+    expect(restored.state.careerTracks.craft).toBe(1);
+    expect(restored.state.careerChoiceForShift).toBeNull();
+    expect(restored.state.shiftStarted).toBe(false);
+  });
+
+  it('lets age become a workflow constraint instead of an instant fail state', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+    loop.restoreCampaign({
+      shiftNumber: 4,
+      zoneUpgrades: { capture: 0, edit: 0, delivery: 0, client: 0 },
+      careerVitals: { stamina: 3, trust: 3, standing: 3 },
+    });
+    const before = loop.currentWorkDuration('capture');
+
+    loop.prepareNextShift();
+
+    expect(loop.state.shiftNumber).toBe(5);
+    expect(loop.state.careerVitals.stamina).toBe(2);
+    expect(loop.careerStageLabel()).toBe('現場主力');
+    expect(loop.currentWorkDuration('capture')).toBeCloseTo(before + 0.24);
+  });
+
+  it('remixes later workdays without breaking the three readable risk profiles', () => {
+    const loop = new AriadneLoop(() => 0.99);
+    loop.prepareShift();
+    loop.restoreCampaign({
+      shiftNumber: 4,
+      zoneUpgrades: { capture: 0, edit: 0, delivery: 0, client: 0 },
+    });
+
+    expect(loop.currentBrief().title).toBe('國際論壇');
+    loop.startNextJob();
+    expect(loop.currentBrief().title).toBe('音樂節頒獎');
+    loop.startNextJob();
+    expect(loop.currentBrief().title).toBe('年度尾牙');
   });
 });
