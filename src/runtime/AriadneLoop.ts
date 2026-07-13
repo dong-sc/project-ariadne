@@ -355,7 +355,7 @@ export const CLIENT_WORK_DURATION = 2.8;
 export const HANDOFF_PREP_DURATION = 3.2;
 const CLIENT_COOLDOWN = 8;
 const LOADOUT_SIZE = 2;
-const RUMOR_RESPONSE_WINDOW = 9;
+const RUMOR_RESPONSE_WINDOW = 13;
 const SUPPORT_WORK_DURATION = 3;
 
 const INCIDENT_POOLS: Readonly<Record<JobBriefId, readonly IncidentId[]>> = {

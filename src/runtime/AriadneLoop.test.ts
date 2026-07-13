@@ -300,12 +300,12 @@ describe('AriadneLoop', () => {
     expect(loop.state.currentRumor?.phase).toBe('active');
 
     const deadlineBefore = loop.state.deadline;
-    const escalated = loop.tick(8);
+    const escalated = loop.tick(12);
     expect(escalated).toContainEqual({
       type: 'rumor-escalated',
       outcome: expect.objectContaining({ rumorId: 'ten-photo-myth', resolved: false }),
     });
-    expect(loop.state.deadline).toBeLessThan(deadlineBefore - 11.9);
+    expect(loop.state.deadline).toBeLessThan(deadlineBefore - 15.9);
     expect(loop.state.completed).toBe(false);
   });
 
