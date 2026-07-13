@@ -193,4 +193,65 @@ describe('AriadneLoop', () => {
     expect(loop.state.deadline).toBe(portrait.deadline + 4);
     expect(loop.currentWorkDuration('edit')).toBe(portrait.workDuration.edit);
   });
+
+  it('turns incomplete field signals into a two-item preflight decision', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+
+    expect(loop.state.shiftStarted).toBe(false);
+    expect(loop.dispatch('capture')).toEqual({ type: 'shift-not-started' });
+    expect(loop.preflightSignals()).toHaveLength(4);
+    expect(new Set(loop.preflightSignals()).size).toBe(4);
+    expect(loop.configureLoadout(['backup-body'])).toBe(false);
+    expect(loop.configureLoadout(['backup-body', 'hotspot', 'dual-reader'])).toBe(false);
+    expect(loop.configureLoadout(['paper-runbook', 'hotspot'])).toBe(true);
+    expect(loop.startShift()).toBe(true);
+    expect(loop.state.currentIncident).toBe('schedule-drift');
+  });
+
+  it('lets the right equipment absorb an incident without hiding its cause', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+    loop.configureLoadout(['paper-runbook', 'hotspot']);
+    loop.startShift();
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    loop.tick(loop.currentWorkDuration('capture') * 0.35);
+    const totalBefore = loop.state.production?.total;
+    const events = loop.tick(0.01);
+
+    expect(events).toContainEqual({
+      type: 'incident-triggered',
+      outcome: expect.objectContaining({
+        incidentId: 'schedule-drift',
+        equipmentId: 'paper-runbook',
+        mitigated: true,
+      }),
+    });
+    expect(loop.state.production?.total).toBe(totalBefore);
+    expect(loop.state.incidentHistory).toHaveLength(1);
+  });
+
+  it('makes an uncovered incident create recoverable time and pressure costs', () => {
+    const loop = new AriadneLoop(() => 0);
+    loop.prepareShift();
+    loop.configureLoadout(['backup-body', 'hotspot']);
+    loop.startShift();
+    loop.dispatch('capture');
+    loop.reachProductionStation();
+    loop.tick(loop.currentWorkDuration('capture') * 0.35);
+    const deadlineBefore = loop.state.deadline;
+    const totalBefore = loop.state.production?.total ?? 0;
+    const clientPressureBefore = loop.state.pressures.client;
+    const events = loop.tick(0.01);
+
+    expect(events).toContainEqual({
+      type: 'incident-triggered',
+      outcome: expect.objectContaining({ incidentId: 'schedule-drift', mitigated: false }),
+    });
+    expect(loop.state.deadline).toBeLessThan(deadlineBefore - 5.9);
+    expect(loop.state.production?.total).toBeCloseTo(totalBefore + 1.5);
+    expect(loop.state.pressures.client).toBeGreaterThan(clientPressureBefore + 31);
+    expect(loop.state.completed).toBe(false);
+  });
 });

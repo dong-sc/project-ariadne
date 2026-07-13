@@ -10,6 +10,8 @@
 8. Art and interface must share one visual grammar.
 9. One excellent five-minute slice is worth more than fifty shallow systems.
 10. The endgame fantasy is calm, not maximal noise.
+11. Events may be unpredictable; their causes must remain understandable afterward.
+12. Equipment changes what the workflow can absorb, not an abstract power score.
 
 ## Ariadne Principle
 

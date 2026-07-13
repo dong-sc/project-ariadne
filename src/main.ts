@@ -19,8 +19,20 @@ async function bootstrap(): Promise<void> {
           <div class="metric"><b id="studio-state">穩定</b><span>工作室</span></div>
           <div class="metric"><b id="assistant-state">待命</b><span>流程助理</span></div>
         </div>
+        <div class="loadout-strip" id="loadout-strip" aria-label="本輪隨身裝備">
+          <span>隨身</span><b id="loadout-one">尚未整備</b><b id="loadout-two">—</b>
+        </div>
       </header>
       <div class="game-canvas" id="game-canvas"></div>
+      <section class="preflight" id="preflight" aria-labelledby="preflight-title">
+        <span>PRE-FLIGHT · 情報不完整</span>
+        <h2 id="preflight-title">今晚只帶兩樣</h2>
+        <p>這些風聲不一定都會發生，也沒有人能替你保證順序。</p>
+        <ul id="field-signals" class="field-signals"></ul>
+        <div class="equipment-grid" id="equipment-grid"></div>
+        <small id="preflight-count">已選 0/2 · 留下什麼，也是一個決定</small>
+        <button id="start-shift" type="button" disabled>收好兩樣，出發</button>
+      </section>
       <div class="completion" id="completion" role="status" aria-live="polite">
         <span id="completion-kicker">DELIVERED · 1/3</span>
         <strong id="completion-title">本案已交件</strong>
@@ -28,6 +40,11 @@ async function bootstrap(): Promise<void> {
         <div class="completion-insight">
           <b id="outcome-title">流程已收束</b>
           <small id="outcome-detail">完成交件後，工作室會留下下一案的餘裕。</small>
+        </div>
+        <div class="incident-debrief">
+          <span>FIELD NOTE · 現場留下的痕跡</span>
+          <b id="incident-title">今晚沒有足夠資料</b>
+          <small id="incident-detail">有些風險只能在真正發生後被看見。</small>
         </div>
         <button id="next-job" type="button">準備好，再接下一案</button>
       </div>

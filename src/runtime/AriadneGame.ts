@@ -1,9 +1,12 @@
 import { Application, Container, Graphics, Text, TextStyle } from 'pixi.js';
 import {
   AriadneLoop,
+  EQUIPMENT,
   JOB_BRIEFS,
   STAGE_ORDER,
   type DispatchResult,
+  type EquipmentId,
+  type IncidentOutcome,
   type JobOutcome,
   type LoopEvent,
   type ProductionStationId,
@@ -79,6 +82,7 @@ export class AriadneGame {
     style: new TextStyle({ fill: 0x9edcff, fontSize: 9, fontWeight: '800', stroke: { color: 0x111620, width: 3 } }),
   });
   private elapsed = 0;
+  private readonly selectedEquipment = new Set<EquipmentId>();
 
   public constructor(private readonly host: HTMLDivElement) {}
 
@@ -109,8 +113,9 @@ export class AriadneGame {
     );
 
     document.querySelector<HTMLButtonElement>('#next-job')?.addEventListener('click', () => this.startNextJob());
-    const brief = this.loop.currentBrief();
-    this.setMessage(`${brief.title}進場。${brief.cue}。先看各站，再派工。`);
+    this.loop.prepareShift();
+    this.setupPreflight();
+    this.openPreflight();
     this.app.ticker.add((ticker) => this.update(Math.min(ticker.deltaMS / 1000, 0.05)));
   }
 
@@ -228,6 +233,107 @@ export class AriadneGame {
     this.world.addChild(this.photographer, this.assistant);
   }
 
+  private setupPreflight(): void {
+    const grid = document.querySelector<HTMLDivElement>('#equipment-grid');
+    if (grid) {
+      grid.replaceChildren(...EQUIPMENT.map((item) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'equipment-option';
+        button.dataset.equipment = item.id;
+        button.setAttribute('aria-pressed', 'false');
+        const label = document.createElement('b');
+        label.textContent = item.label;
+        const purpose = document.createElement('small');
+        purpose.textContent = item.purpose;
+        button.append(label, purpose);
+        button.addEventListener('click', () => this.toggleEquipment(item.id));
+        return button;
+      }));
+    }
+
+    document.querySelector<HTMLButtonElement>('#start-shift')?.addEventListener('click', () => {
+      const loadout = [...this.selectedEquipment];
+      if (!this.loop.configureLoadout(loadout) || !this.loop.startShift()) return;
+      document.querySelector('#preflight')?.classList.remove('is-visible');
+      document.querySelector('.game-shell')?.classList.remove('is-preflight');
+      this.setMessage('裝備收好了。簡報只是一部分，先看現場，再派工。');
+      this.renderLoadout();
+    });
+  }
+
+  private openPreflight(): void {
+    this.selectedEquipment.clear();
+    const signals = document.querySelector<HTMLUListElement>('#field-signals');
+    if (signals) {
+      signals.replaceChildren(...this.loop.preflightSignals().map((signal) => {
+        const item = document.createElement('li');
+        item.textContent = signal;
+        return item;
+      }));
+    }
+    document.querySelector('#preflight')?.classList.add('is-visible');
+    document.querySelector('.game-shell')?.classList.add('is-preflight');
+    this.setMessage('出發前聽到四段風聲，其中一段今晚不會發生。你能帶兩樣，不能把未知全部消掉。');
+    this.renderPreflightSelection();
+    this.renderLoadout();
+  }
+
+  private toggleEquipment(id: EquipmentId): void {
+    if (this.selectedEquipment.has(id)) {
+      this.selectedEquipment.delete(id);
+    } else if (this.selectedEquipment.size < 2) {
+      this.selectedEquipment.add(id);
+    }
+    this.renderPreflightSelection();
+    this.renderLoadout();
+  }
+
+  private renderPreflightSelection(): void {
+    document.querySelectorAll<HTMLButtonElement>('.equipment-option').forEach((button) => {
+      const id = button.dataset.equipment as EquipmentId | undefined;
+      const selected = Boolean(id && this.selectedEquipment.has(id));
+      button.classList.toggle('is-selected', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+    this.setText('preflight-count', `已選 ${this.selectedEquipment.size}/2 · 留下什麼，也是一個決定`);
+    const start = document.querySelector<HTMLButtonElement>('#start-shift');
+    if (start) start.disabled = this.selectedEquipment.size !== 2;
+  }
+
+  private renderLoadout(): void {
+    const loadout = this.loop.state.loadout.length > 0
+      ? this.loop.state.loadout
+      : [...this.selectedEquipment];
+    const slots = ['loadout-one', 'loadout-two'];
+    slots.forEach((id, index) => {
+      const element = document.getElementById(id);
+      if (!element) return;
+      const equipment = loadout[index];
+      const used = equipment
+        ? this.loop.state.incidentHistory.some((outcome) => outcome.mitigated && outcome.equipmentId === equipment)
+        : false;
+      element.textContent = equipment ? `${this.loop.equipmentLabel(equipment)}${used ? ' · 接住' : ''}` : index === 0 ? '尚未整備' : '—';
+      element.classList.toggle('is-used', used);
+    });
+  }
+
+  private handleIncident(outcome: IncidentOutcome): void {
+    const incident = this.loop.currentIncidentDefinition();
+    const station = incident?.station ?? this.loop.state.active;
+    this.setMessage(`${outcome.title}。${outcome.detail}`);
+    this.spawnFeedback(
+      this.stationCenter(station).x,
+      this.stationCenter(station).y,
+      outcome.mitigated ? '備援接住' : '現場失速',
+    );
+    const shell = document.querySelector('.game-shell');
+    shell?.classList.remove('is-incident-contained', 'is-incident-exposed');
+    shell?.classList.add(outcome.mitigated ? 'is-incident-contained' : 'is-incident-exposed');
+    window.setTimeout(() => shell?.classList.remove('is-incident-contained', 'is-incident-exposed'), 1800);
+    this.renderLoadout();
+  }
+
   private update(dt: number): void {
     this.elapsed += dt;
     this.animatePeople();
@@ -239,6 +345,7 @@ export class AriadneGame {
     this.renderBriefBoard();
     this.renderStations();
     this.renderHud(stress);
+    this.renderLoadout();
   }
 
   private onStationClick(id: StationId): void {
@@ -277,6 +384,8 @@ export class AriadneGame {
     } else if (result.type === 'wrong-stage') {
       this.setMessage(`這一步還沒到。現在先派工「${this.stationLabel(result.expected)}」。`);
       this.pulseStation(result.expected);
+    } else if (result.type === 'shift-not-started') {
+      this.setMessage('先完成出發整備。今晚只能帶兩樣，留下什麼也會產生後果。');
     } else {
       this.setMessage('本案已交付。先喘口氣，準備好再接下一案。');
     }
@@ -304,6 +413,8 @@ export class AriadneGame {
     } else if (event.type === 'client-escalated') {
       this.setMessage('客戶追問了，交件時間被壓縮。下次要更早派助理更新進度。');
       this.spawnFeedback(this.stationCenter('client').x, this.stationCenter('client').y, '追問');
+    } else if (event.type === 'incident-triggered') {
+      this.handleIncident(event.outcome);
     } else {
       this.setMessage(`${this.stationLabel(event.station)}出了差錯。流程退回，但案件仍救得回來。`);
       this.spawnFeedback(this.stationCenter(event.station).x, this.stationCenter(event.station).y, '需要重派');
@@ -523,6 +634,7 @@ export class AriadneGame {
   }
 
   private stationStatus(id: StationId): string {
+    if (!this.loop.state.shiftStarted) return '整備後出發';
     if (this.loop.state.completed) return '完成';
 
     if (id === 'client') {
@@ -603,8 +715,10 @@ export class AriadneGame {
     const handoffPrep = this.loop.state.handoffPrep;
     const client = this.loop.state.client;
     const nextProduction = this.nextProductionStation();
-    const nextAction = production
-      ? production.phase === 'moving'
+    const nextAction = !this.loop.state.shiftStarted
+      ? '出發前｜只能帶兩樣'
+      : production
+        ? production.phase === 'moving'
         ? `攝影師正前往${this.stationLabel(production.station)}`
         : handoffPrep
           ? `${this.stationLabel(production.station)}中｜助理準備${this.stationLabel(handoffPrep.station)}`
@@ -615,27 +729,31 @@ export class AriadneGame {
               : nextProduction
                 ? `${this.stationLabel(production.station)}中｜選擇助理下一步`
                 : `${this.stationLabel(production.station)}中｜觀察客戶`
-      : this.loop.state.completed
-        ? '本案完成｜工作室已安靜'
-        : `下一步｜派工${this.stationLabel(this.loop.state.active)}`;
+        : this.loop.state.completed
+          ? '本案完成｜工作室已安靜'
+          : `下一步｜派工${this.stationLabel(this.loop.state.active)}`;
 
     this.setText('next-action', nextAction);
     const brief = this.loop.currentBrief();
     this.setText('job-title', brief.title);
     this.setText('job-focus', `${this.loop.state.jobIndex + 1}/${JOB_BRIEFS.length} · ${brief.focus}`);
-    this.setText('deadline', this.loop.state.completed ? '完成' : `${Math.max(0, Math.ceil(this.loop.state.deadline))}s`);
-    this.setText('studio-state', this.loop.state.completed
-      ? '安靜'
-      : stress >= 75
-        ? '危險'
-        : stress >= 45
-          ? '忙亂'
-          : this.loop.state.workflowBuffer > 0 ? '有餘裕' : '穩定');
-    this.setText('assistant-state', handoffPrep
-      ? handoffPrep.phase === 'moving' ? '前往交接' : '準備中'
-      : client
-        ? client.phase === 'moving' ? '前往客戶' : '回覆中'
-        : '待命');
+    this.setText('deadline', !this.loop.state.shiftStarted ? '—' : this.loop.state.completed ? '完成' : `${Math.max(0, Math.ceil(this.loop.state.deadline))}s`);
+    this.setText('studio-state', !this.loop.state.shiftStarted
+      ? '整備中'
+      : this.loop.state.completed
+        ? '安靜'
+        : stress >= 75
+          ? '危險'
+          : stress >= 45
+            ? '忙亂'
+            : this.loop.state.workflowBuffer > 0 ? '有餘裕' : '穩定');
+    this.setText('assistant-state', !this.loop.state.shiftStarted
+      ? '盤點中'
+      : handoffPrep
+        ? handoffPrep.phase === 'moving' ? '前往交接' : '準備中'
+        : client
+          ? client.phase === 'moving' ? '前往客戶' : '回覆中'
+          : '待命');
   }
 
   private completeJob(): void {
@@ -655,6 +773,13 @@ export class AriadneGame {
     const insight = this.outcomeCopy(outcome);
     this.setText('outcome-title', insight.title);
     this.setText('outcome-detail', insight.detail);
+    const incidentOutcome = this.loop.state.lastIncidentOutcome;
+    this.setText('incident-title', incidentOutcome
+      ? incidentOutcome.mitigated
+        ? `${this.loop.equipmentLabel(incidentOutcome.equipmentId)}接住了：${incidentOutcome.title}`
+        : `沒帶${this.loop.equipmentLabel(incidentOutcome.equipmentId)}：${incidentOutcome.title}`
+      : '今晚沒有留下足夠紀錄');
+    this.setText('incident-detail', incidentOutcome?.detail ?? '有些風險只能在真正發生後被看見。');
     this.setText('next-job', shiftComplete ? '重新開始一輪工作日' : `接下一案｜${nextBrief.title}`);
 
     this.spawnFeedback(260, 310, shiftComplete ? '今日收工' : '完成交件');
@@ -665,12 +790,18 @@ export class AriadneGame {
   }
 
   private startNextJob(): void {
+    const shiftComplete = this.loop.isShiftComplete();
     this.loop.startNextJob();
     document.querySelector('.game-shell')?.classList.remove('is-complete');
     document.querySelector('.game-shell')?.classList.remove('is-shift-complete');
     document.querySelector('#completion')?.classList.remove('is-visible');
     this.photographer.position.set(112, 528);
     this.assistant.position.set(420, 520);
+    if (shiftComplete) {
+      this.loop.prepareShift();
+      this.openPreflight();
+      return;
+    }
     const brief = this.loop.currentBrief();
     this.setMessage(`${brief.title}進場。${brief.cue}。先讀現場，再點拍攝站派工。`);
   }
