@@ -1,5 +1,5 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/project-ariadne/',
+  base: process.env.VITE_BASE_PATH ?? '/project-ariadne/',
 });

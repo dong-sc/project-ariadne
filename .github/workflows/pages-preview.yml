@@ -1,8 +1,8 @@
-name: Deploy preview
+name: Deploy Sprint 2 preview
 
 on:
   push:
-    branches: [sprint-1-living-office]
+    branches: [sprint-2-one-click-decisions]
   workflow_dispatch:
 
 permissions:
@@ -11,24 +11,48 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages-preview
+  group: pages
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out deployed Sprint 1
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: stable
+      - name: Check out Sprint 2
+        uses: actions/checkout@v4
+        with:
+          path: preview
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm install
-      - run: npm test
-      - run: npm run build
+      - name: Build deployed Sprint 1 at the root URL
+        working-directory: stable
+        run: |
+          npm install
+          npm test
+          npm run build
+      - name: Verify and build Sprint 2
+        working-directory: preview
+        env:
+          VITE_BASE_PATH: /project-ariadne/sprint-2/
+        run: |
+          npm install
+          npm test
+          npm run typecheck
+          npm run build
+      - name: Add Sprint 2 without replacing the Sprint 1 root
+        run: |
+          mkdir -p stable/dist/sprint-2
+          cp -R preview/dist/. stable/dist/sprint-2/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: stable/dist
 
   deploy:
     environment:
