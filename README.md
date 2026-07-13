@@ -10,15 +10,15 @@ The player begins by manually rescuing a chaotic photography studio. Over time, 
 
 **建立系統，而不是等待奇蹟。**
 
-## First vertical slice
+## Current playable slice
 
-- one press-conference job
+Sprint 1 focuses on making chaos visible through the room itself:
+
 - four linked workstations
 - click as attention allocation
+- visible queues, warning states, and local movement
 - deadlines and recoverable stage failure
-- visible chaos escalation
-- one workflow transformation
-- one Field Note
+- a calmer room after successful delivery
 
 ## Stack
 
@@ -26,7 +26,7 @@ The player begins by manually rescuing a chaotic photography studio. Over time, 
 - Vite
 - PixiJS
 - Vitest
-- localStorage
+- GitHub Actions
 - GitHub Pages
 
 ## Local development
