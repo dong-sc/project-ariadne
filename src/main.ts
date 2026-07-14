@@ -8,17 +8,89 @@ async function bootstrap(): Promise<void> {
   root.innerHTML = `
     <section class="game-shell">
       <header class="game-hud">
-        <h1>Project Ariadne</h1>
-        <p>分配注意力，阻止工作室雪崩。</p>
+        <div class="title-row">
+          <h1>Project Ariadne</h1>
+          <span class="sprint-label" id="shift-label">WORKDAY 1 · ONE DECISION</span>
+        </div>
+        <p id="next-action">下一步｜派工拍攝</p>
         <div class="metrics">
-          <div class="metric"><b id="cash">$3,000</b><span>現金</span></div>
-          <div class="metric"><b id="deadline">90s</b><span>截止</span></div>
-          <div class="metric"><b id="stress">0%</b><span>混亂</span></div>
-          <div class="metric"><b id="combo">0</b><span>專注</span></div>
+          <div class="metric metric-brief"><b id="job-title">活動快訊</b><span id="job-focus">1/3 · 三站平衡</span></div>
+          <div class="metric" id="deadline-card"><b id="deadline">78s</b><span>截止</span></div>
+          <div class="metric"><b id="studio-state">穩定</b><span>工作室</span></div>
+          <div class="metric"><b id="assistant-state">待命</b><span>流程助理</span></div>
+        </div>
+        <div class="loadout-strip" id="loadout-strip" aria-label="本輪隨身裝備">
+          <span>隨身</span><b id="loadout-one">尚未整備</b><b id="loadout-two">—</b>
+        </div>
+        <div class="crew-strip" aria-live="polite">
+          <span>搭檔</span><b id="crew-specialist">尚未選人</b><i id="field-rumor">現場還沒有風聲</i>
         </div>
       </header>
       <div class="game-canvas" id="game-canvas"></div>
-      <div class="bottom-copy" id="message">點擊工作站投入注意力。真正的高手，會讓火越來越少。</div>
+      <section class="priority-alert" id="priority-alert" aria-live="assertive" aria-atomic="true">
+        <div class="priority-alert-topline">
+          <span id="priority-alert-kind">現場風聲</span>
+          <b id="priority-alert-time">13s</b>
+        </div>
+        <strong id="priority-alert-text">有一句未經確認的話正在擴散。</strong>
+        <small id="priority-alert-hint">判斷來源，派搭檔去側台或媒體席查證。</small>
+      </section>
+      <section class="preflight" id="preflight" aria-labelledby="preflight-title">
+        <span>PRE-FLIGHT · 情報不完整</span>
+        <h2 id="preflight-title">今晚只帶兩樣</h2>
+        <p>這些風聲不一定都會發生，也沒有人能替你保證順序。</p>
+        <section class="career-pressure" id="career-pressure" aria-labelledby="dilemma-title">
+          <span>WORK BEFORE WORK · 還沒出發，規則先被改了</span>
+          <b id="dilemma-title">窗口先丟來一句沒有寫進合約的話</b>
+          <p id="dilemma-body">你要先決定這件事由誰承擔，才能開始整備。</p>
+          <div class="dilemma-grid" id="dilemma-grid"></div>
+          <small id="dilemma-result">每個做法都能救今天，也都會留下別的東西。</small>
+        </section>
+        <ul id="field-signals" class="field-signals"></ul>
+        <div class="equipment-grid" id="equipment-grid"></div>
+        <small id="preflight-count">已選 0/2 · 留下什麼，也是一個決定</small>
+        <div class="crew-pick">
+          <span>今晚和誰搭檔</span>
+          <div class="specialist-grid" id="specialist-grid"></div>
+        </div>
+        <div class="career-ledger" id="career-ledger">
+          <b id="career-stage">還在證明自己</b>
+          <span id="career-vitals">體力仍有餘裕 · 團隊照指令做 · 議價反覆拉扯</span>
+          <small id="career-tracks">生涯尚未定型｜每個工作日都會留下方向與代價</small>
+        </div>
+        <button id="start-shift" type="button" disabled>決定怎麼接，再出發</button>
+      </section>
+      <div class="completion" id="completion" role="status" aria-live="polite">
+        <span id="completion-kicker">DELIVERED · 1/3</span>
+        <strong id="completion-title">本案已交件</strong>
+        <p id="completion-copy">壓力歸零。流程替你把混亂留在身後。</p>
+        <div class="completion-insight">
+          <b id="outcome-title">流程已收束</b>
+          <small id="outcome-detail">完成交件後，工作室會留下下一案的餘裕。</small>
+        </div>
+        <div class="incident-debrief">
+          <span>FIELD NOTE · 現場留下的痕跡</span>
+          <b id="incident-title">今晚沒有足夠資料</b>
+          <small id="incident-detail">有些風險只能在真正發生後被看見。</small>
+        </div>
+        <div class="rumor-debrief">
+          <span>TEAM CHAT · 大拜拜留下的話</span>
+          <b id="rumor-title">現場暫時沒有耳語</b>
+          <small id="rumor-detail">真正麻煩的，常常不是工作，而是沒有人確認過的話。</small>
+        </div>
+        <div class="upgrade-panel" id="upgrade-panel">
+          <span>SOP INVESTMENT · 把一次經驗留下來</span>
+          <small id="upgrade-copy">交件後選一處改善，下一案就少一點臨場負擔。</small>
+          <div class="upgrade-grid" id="upgrade-grid"></div>
+        </div>
+        <div class="career-panel is-hidden" id="career-panel">
+          <span>CAREER CROSSROAD · 今天留下什麼</span>
+          <small id="career-copy">選一條路帶進明天。每個好處，都會帶著一筆代價。</small>
+          <div class="career-grid" id="career-grid"></div>
+        </div>
+        <button id="next-job" type="button">準備好，再接下一案</button>
+      </div>
+      <div class="bottom-copy" id="message" aria-live="polite">先觀察，再點一下派工。</div>
     </section>
   `;
 
